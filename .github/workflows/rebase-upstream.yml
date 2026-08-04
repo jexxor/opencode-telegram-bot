@@ -1,0 +1,53 @@
+name: Rebase Fork From Upstream
+
+on:
+  schedule:
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebase-upstream
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fork branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Rebase onto upstream
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+           git remote add upstream https://github.com/grinev/opencode-telegram-bot.git
+           git fetch upstream main
+           printf 'README.md merge=fork-readme\n' >> .git/info/attributes
+           # During a rebase, %B is the fork's version of README.md.
+           git config merge.fork-readme.driver 'cp %B %A'
+
+           upstream_version=$(git show upstream/main:package.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          fork_version="${upstream_version}-fork"
+          current_version=$(node -p "require('./package.json').version")
+
+          if [ "$current_version" = "$fork_version" ]; then
+            git rebase upstream/main
+          else
+            GIT_SEQUENCE_EDITOR="sed -i '/^pick .* chore: set fork version /d'" git rebase -i upstream/main
+          fi
+
+          current_version=$(node -p "require('./package.json').version")
+          if [ "$current_version" != "$fork_version" ]; then
+            npm version "$fork_version" --no-git-tag-version --ignore-scripts
+            git add package.json package-lock.json
+            git commit -m "chore: set fork version $fork_version"
+          fi
+
+          git push --force-with-lease origin HEAD:main
