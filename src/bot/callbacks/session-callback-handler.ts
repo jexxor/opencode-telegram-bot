@@ -1,14 +1,12 @@
 import type { Bot, Context } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
-import { resolveProjectAgent } from "../../app/services/agent-selection-service.js";
+import { fetchCurrentAgent } from "../../app/services/agent-selection-service.js";
 import { setCurrentSession } from "../../app/services/session-service.js";
 import type { SessionInfo } from "../../app/types/session.js";
 import { getCurrentProject } from "../../app/stores/settings-store.js";
 import { clearAllInteractionState, interactionManager } from "../../app/managers/interaction-manager.js";
 import { keyboardManager } from "../keyboards/keyboard-manager.js";
 import { appendInlineMenuCancelButton, ensureActiveInlineMenu } from "../menus/inline-menu.js";
-import { isForegroundBusy } from "../../app/services/run-control-service.js";
-import { replyBusyBlocked } from "../messages/busy-blocked-renderer.js";
 import { logger } from "../../utils/logger.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { config } from "../../config.js";
@@ -136,7 +134,7 @@ async function selectSessionById(
 
   if (ctx.chat) {
     const chatId = ctx.chat.id;
-    const currentAgent = await resolveProjectAgent();
+    const currentAgent = await fetchCurrentAgent({ syncFromSession: true });
 
     keyboardManager.updateAgent(currentAgent);
 
@@ -213,11 +211,6 @@ export async function handleBackgroundSessionOpen(
     return false;
   }
 
-  if (isForegroundBusy()) {
-    await replyBusyBlocked(ctx);
-    return true;
-  }
-
   if (shouldBlockBackgroundSessionOpen()) {
     await ctx.answerCallbackQuery({ text: t("interaction.blocked.finish_current") }).catch(() => {});
     return true;
@@ -244,11 +237,6 @@ export async function handleSessionSelect(ctx: Context, deps: SessionSelectDeps)
   const callbackQuery = ctx.callbackQuery;
   if (!callbackQuery?.data || !callbackQuery.data.startsWith(SESSION_CALLBACK_PREFIX)) {
     return false;
-  }
-
-  if (isForegroundBusy()) {
-    await replyBusyBlocked(ctx);
-    return true;
   }
 
   const page = parseSessionPageCallback(callbackQuery.data);
@@ -409,7 +397,7 @@ function formatSessionPreview(_sessionTitle: string, items: SessionPreviewItem[]
   return truncateText(rawMessage, TELEGRAM_MESSAGE_LIMIT);
 }
 
-async function sendSessionPreview(
+export async function sendSessionPreview(
   api: Context["api"],
   chatId: number,
   messageId: number | null,

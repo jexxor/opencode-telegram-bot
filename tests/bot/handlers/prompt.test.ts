@@ -23,6 +23,8 @@ const mocked = vi.hoisted(() => ({
   setBotAndChatIdMock: vi.fn(),
   attachToSessionMock: vi.fn(),
   getTtsModeMock: vi.fn(),
+  addQueuedSessionPromptMock: vi.fn(),
+  notifyQueueChangedMock: vi.fn(),
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
@@ -139,6 +141,16 @@ vi.mock("../../../src/app/managers/external-input-suppression-manager.js", () =>
   },
 }));
 
+vi.mock("../../../src/app/stores/session-prompt-queue-store.js", () => ({
+  addQueuedSessionPrompt: mocked.addQueuedSessionPromptMock,
+}));
+
+vi.mock("../../../src/app/services/session-prompt-queue-runtime-service.js", () => ({
+  sessionPromptQueueRuntime: {
+    notifyQueueChanged: mocked.notifyQueueChangedMock,
+  },
+}));
+
 function createContext(): Context {
   return {
     chat: { id: 777 },
@@ -189,6 +201,8 @@ describe("bot/handlers/prompt", () => {
     mocked.setBotAndChatIdMock.mockReset();
     mocked.attachToSessionMock.mockReset();
     mocked.getTtsModeMock.mockReset();
+    mocked.addQueuedSessionPromptMock.mockReset().mockResolvedValue(1);
+    mocked.notifyQueueChangedMock.mockReset();
     mocked.getTtsModeMock.mockReturnValue("off");
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
@@ -222,6 +236,35 @@ describe("bot/handlers/prompt", () => {
       ensureEventSubscription: expect.any(Function),
     });
     expect(mocked.suppressionRegisterMock).toHaveBeenCalledWith("session-1", "Review README");
+  });
+
+  it("queues text for the active session when it is busy", async () => {
+    mocked.sessionStatusMock.mockResolvedValue({
+      data: { "session-1": { type: "busy" } },
+      error: null,
+    });
+    const ctx = createContext();
+
+    const handled = await processUserPrompt(ctx, "Do this next", createDeps());
+
+    expect(handled).toBe(false);
+    expect(mocked.addQueuedSessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        sessionTitle: "Session",
+        directory: "D:\\Projects\\Repo",
+        text: "Do this next",
+        agent: "build",
+        model: {
+          providerID: "openai",
+          modelID: "gpt-5",
+          variant: "default",
+        },
+      }),
+    );
+    expect(mocked.notifyQueueChangedMock).toHaveBeenCalled();
+    expect(ctx.reply).toHaveBeenCalledWith("⏳ Task queued for Session (position 1).");
+    expect(mocked.safeBackgroundTaskMock).not.toHaveBeenCalled();
   });
 
   it("starts prompts through promptAsync instead of the streaming prompt endpoint", async () => {

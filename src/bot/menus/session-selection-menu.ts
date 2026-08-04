@@ -2,6 +2,10 @@ import { InlineKeyboard } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
 import { getDateLocale, t } from "../../i18n/index.js";
 import { logger } from "../../utils/logger.js";
+import {
+  formatSessionActivityStatus,
+  sessionStatusManager,
+} from "../../app/managers/session-status-manager.js";
 
 export const SESSION_CALLBACK_PREFIX = "session:";
 const SESSION_PAGE_CALLBACK_PREFIX = "session:page:";
@@ -135,6 +139,13 @@ export async function loadSessionPage(
 
   const hasNext = sessions.length > endExclusive;
   const pagedSessions = sessions.slice(startIndex, endExclusive);
+  sessionStatusManager.registerMany(
+    (pagedSessions as SessionListItem[]).map((session) => ({
+      id: session.id,
+      title: session.title,
+      directory: session.directory || directory,
+    })),
+  );
 
   logger.debug(
     `[Sessions] Loaded page=${page + 1}, startIndex=${startIndex}, endExclusive=${endExclusive}, pageSize=${pageSize}, items=${pagedSessions.length}, hasNext=${hasNext}`,
@@ -154,7 +165,8 @@ function buildSessionsKeyboard(pageData: SessionPage, pageSize: number): InlineK
 
   pageData.sessions.forEach((session, index) => {
     const date = new Date(session.time.created).toLocaleDateString(localeForDate);
-    const label = `${pageStartIndex + index + 1}. ${session.title} (${date})`;
+    const status = sessionStatusManager.get(session.id)?.status ?? "finished";
+    const label = `${formatSessionActivityStatus(status)} | ${pageStartIndex + index + 1}. ${session.title} (${date})`;
     keyboard.text(label, `${SESSION_CALLBACK_PREFIX}${session.id}`).row();
   });
 

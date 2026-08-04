@@ -17,6 +17,7 @@ import {
   type ScheduledTask,
 } from "../../app/types/scheduled-task.js";
 import { logger } from "../../utils/logger.js";
+import { getCurrentSession } from "../../app/services/session-service.js";
 
 const TASK_PROMPT_PREVIEW_LENGTH = 100;
 
@@ -93,7 +94,7 @@ function formatTaskCreatedMessage(task: ScheduledTask): string {
 
   return t("task.created", {
     description: truncateTaskPrompt(task.prompt),
-    project: task.projectWorktree,
+    project: `${task.projectWorktree}\n${t("status.session_selected", { title: task.sessionTitle })}`,
     model,
     schedule: task.scheduleSummary,
     cronLine,
@@ -230,6 +231,8 @@ async function deleteMessageIfPresent(
 function buildScheduledTask(
   projectId: string,
   projectWorktree: string,
+  sessionId: string,
+  sessionTitle: string,
   model: ScheduledTask["model"],
   scheduleText: string,
   parsedSchedule: ParsedTaskSchedule,
@@ -239,6 +242,8 @@ function buildScheduledTask(
     id: randomUUID(),
     projectId,
     projectWorktree,
+    sessionId,
+    sessionTitle,
     model,
     scheduleText,
     scheduleSummary: parsedSchedule.summary,
@@ -274,6 +279,12 @@ export async function taskCommand(ctx: CommandContext<Context>): Promise<void> {
     return;
   }
 
+  const currentSession = getCurrentSession();
+  if (!currentSession || currentSession.directory !== currentProject.worktree) {
+    await ctx.reply(t("context.no_active_session"));
+    return;
+  }
+
   if (isTaskLimitReached()) {
     await ctx.reply(t("task.limit_reached", { limit: String(config.bot.taskLimit) }));
     return;
@@ -281,7 +292,13 @@ export async function taskCommand(ctx: CommandContext<Context>): Promise<void> {
 
   const currentModel = createScheduledTaskModel(getStoredModel());
 
-  taskCreationManager.start(currentProject.id, currentProject.worktree, currentModel);
+  taskCreationManager.start(
+    currentProject.id,
+    currentProject.worktree,
+    currentSession.id,
+    currentSession.title,
+    currentModel,
+  );
   interactionManager.start({
     kind: "task",
     expectedInput: "text",
@@ -425,6 +442,8 @@ export async function handleTaskTextInput(ctx: Context): Promise<boolean> {
     const task = buildScheduledTask(
       flowState.projectId,
       flowState.projectWorktree,
+      flowState.sessionId,
+      flowState.sessionTitle,
       flowState.model,
       flowState.scheduleText,
       flowState.parsedSchedule,

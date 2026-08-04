@@ -14,6 +14,8 @@ export interface ScheduledTaskBase {
   id: string;
   projectId: string;
   projectWorktree: string;
+  sessionId: string;
+  sessionTitle: string;
   model: ScheduledTaskModel;
   scheduleText: string;
   scheduleSummary: string;
@@ -63,6 +65,8 @@ export interface TaskCreationState {
   stage: "awaiting_schedule" | "parsing_schedule" | "awaiting_prompt";
   projectId: string;
   projectWorktree: string;
+  sessionId: string;
+  sessionTitle: string;
   model: ScheduledTaskModel;
   scheduleText: string | null;
   parsedSchedule: ParsedTaskSchedule | null;

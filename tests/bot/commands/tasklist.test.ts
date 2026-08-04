@@ -31,6 +31,8 @@ function createTask(id: string, overrides: Partial<Record<string, unknown>> = {}
     cron: "0 * * * *",
     projectId: `project-${id}`,
     projectWorktree: `D:\\Projects\\${id}`,
+    sessionId: `session-${id}`,
+    sessionTitle: `Session ${id}`,
     model: {
       providerID: "openai",
       modelID: "gpt-5",

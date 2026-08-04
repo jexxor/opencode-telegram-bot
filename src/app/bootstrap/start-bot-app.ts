@@ -11,6 +11,10 @@ import {
 } from "../../opencode/ready-refresh.js";
 import { flushSettings, loadSettings } from "../stores/settings-store.js";
 import { scheduledTaskRuntime } from "../services/scheduled-task-runtime-service.js";
+import { sessionPromptQueueRuntime } from "../services/session-prompt-queue-runtime-service.js";
+import { agentLoopRuntime } from "../services/agent-loop-runtime-service.js";
+import { missionRuntime } from "../services/mission-runtime-service.js";
+import { closeMissionStore, initializeMissionStore } from "../stores/mission-store.js";
 import { reconcileStoredModelSelection } from "../services/model-selection-service.js";
 import { getRuntimeMode } from "../../runtime/mode.js";
 import { getRuntimePaths } from "../../runtime/paths.js";
@@ -104,6 +108,7 @@ export async function startBotApp(): Promise<void> {
   process.on("uncaughtException", uncaughtExceptionHandler);
 
   await loadSettings();
+  await initializeMissionStore();
   await reconcileStoredModelSelection();
   registerOpenCodeReadyRefreshHandler();
   const bot = createBot();
@@ -111,6 +116,9 @@ export async function startBotApp(): Promise<void> {
     bot,
     createScheduledTaskDeliverySender(bot.api, config.telegram.allowedUserId),
   );
+  sessionPromptQueueRuntime.initialize(bot, config.telegram.allowedUserId);
+  agentLoopRuntime.initialize();
+  await missionRuntime.initialize();
   safeBackgroundTask({
     taskName: "app.opencodeStartup",
     task: async () => {
@@ -132,6 +140,9 @@ export async function startBotApp(): Promise<void> {
     cleanupBotRuntime(`app_shutdown_${signal.toLowerCase()}`);
     opencodeAutoRestartService.stop();
     scheduledTaskRuntime.shutdown();
+    sessionPromptQueueRuntime.shutdown();
+    agentLoopRuntime.shutdown();
+    void missionRuntime.shutdown();
 
     shutdownTimeout = setTimeout(() => {
       logger.warn(`[App] Shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS}ms, forcing exit.`);
@@ -188,6 +199,10 @@ export async function startBotApp(): Promise<void> {
     cleanupBotRuntime("app_shutdown_complete");
     opencodeAutoRestartService.stop();
     scheduledTaskRuntime.shutdown();
+    sessionPromptQueueRuntime.shutdown();
+    agentLoopRuntime.shutdown();
+    await missionRuntime.shutdown();
+    closeMissionStore();
     await clearManagedServiceState().catch((error) => {
       logger.warn("[App] Failed to clear managed service state", error);
     });

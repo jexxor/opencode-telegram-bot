@@ -76,17 +76,17 @@ describe("bot/commands/projects handleProjectSelect", () => {
     expect(ctx.reply).toHaveBeenCalledWith(t("projects.select_error"));
   });
 
-  it("blocks project selection callback while foreground session is busy", async () => {
+  it("allows project menu callbacks while foreground session is busy", async () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
+    mocked.getProjectsMock.mockResolvedValue([]);
 
-    const ctx = createCallbackContext("project:abc");
+    const ctx = createCallbackContext("projects:page:0");
     const handled = await handleProjectSelect(ctx);
 
     expect(handled).toBe(true);
-    expect(mocked.getProjectsMock).not.toHaveBeenCalled();
-    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
-      text: t("bot.session_busy"),
-    });
+    expect(mocked.getProjectsMock).toHaveBeenCalled();
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith();
+    expect(ctx.reply).toHaveBeenCalledWith(t("projects.empty"));
   });
 
   it("does not block permission callbacks while foreground session is busy", async () => {

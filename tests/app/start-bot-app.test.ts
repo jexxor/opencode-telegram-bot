@@ -14,6 +14,14 @@ const mocked = vi.hoisted(() => ({
   flushSettingsMock: vi.fn(),
   scheduledTaskInitializeMock: vi.fn(),
   scheduledTaskShutdownMock: vi.fn(),
+  sessionPromptQueueInitializeMock: vi.fn(),
+  sessionPromptQueueShutdownMock: vi.fn(),
+  agentLoopInitializeMock: vi.fn(),
+  agentLoopShutdownMock: vi.fn(),
+  missionInitializeMock: vi.fn(),
+  missionShutdownMock: vi.fn(),
+  missionStoreInitializeMock: vi.fn(),
+  missionStoreCloseMock: vi.fn(),
   reconcileStoredModelSelectionMock: vi.fn(),
   clearServiceStateFileMock: vi.fn(),
   isServiceChildProcessMock: vi.fn(),
@@ -65,6 +73,32 @@ vi.mock("../../src/app/services/scheduled-task-runtime-service.js", () => ({
     initialize: mocked.scheduledTaskInitializeMock,
     shutdown: mocked.scheduledTaskShutdownMock,
   },
+}));
+
+vi.mock("../../src/app/services/session-prompt-queue-runtime-service.js", () => ({
+  sessionPromptQueueRuntime: {
+    initialize: mocked.sessionPromptQueueInitializeMock,
+    shutdown: mocked.sessionPromptQueueShutdownMock,
+  },
+}));
+
+vi.mock("../../src/app/services/agent-loop-runtime-service.js", () => ({
+  agentLoopRuntime: {
+    initialize: mocked.agentLoopInitializeMock,
+    shutdown: mocked.agentLoopShutdownMock,
+  },
+}));
+
+vi.mock("../../src/app/services/mission-runtime-service.js", () => ({
+  missionRuntime: {
+    initialize: mocked.missionInitializeMock,
+    shutdown: mocked.missionShutdownMock,
+  },
+}));
+
+vi.mock("../../src/app/stores/mission-store.js", () => ({
+  closeMissionStore: mocked.missionStoreCloseMock,
+  initializeMissionStore: mocked.missionStoreInitializeMock,
 }));
 
 vi.mock("../../src/app/services/model-selection-service.js", () => ({
@@ -180,6 +214,12 @@ describe("app/start-bot-app", () => {
     mocked.flushSettingsMock.mockReset();
     mocked.scheduledTaskInitializeMock.mockReset();
     mocked.scheduledTaskShutdownMock.mockReset();
+    mocked.agentLoopInitializeMock.mockReset();
+    mocked.agentLoopShutdownMock.mockReset();
+    mocked.missionInitializeMock.mockReset();
+    mocked.missionShutdownMock.mockReset();
+    mocked.missionStoreInitializeMock.mockReset();
+    mocked.missionStoreCloseMock.mockReset();
     mocked.reconcileStoredModelSelectionMock.mockReset();
     mocked.clearServiceStateFileMock.mockReset();
     mocked.isServiceChildProcessMock.mockReset();
@@ -197,6 +237,9 @@ describe("app/start-bot-app", () => {
     mocked.loadSettingsMock.mockResolvedValue(undefined);
     mocked.flushSettingsMock.mockResolvedValue(undefined);
     mocked.scheduledTaskInitializeMock.mockResolvedValue(undefined);
+    mocked.missionInitializeMock.mockResolvedValue(undefined);
+    mocked.missionShutdownMock.mockResolvedValue(undefined);
+    mocked.missionStoreInitializeMock.mockResolvedValue(undefined);
     mocked.reconcileStoredModelSelectionMock.mockResolvedValue(undefined);
     mocked.isServiceChildProcessMock.mockReturnValue(false);
     mocked.initializeLoggerMock.mockResolvedValue(undefined);
@@ -221,6 +264,17 @@ describe("app/start-bot-app", () => {
 
     expect(mocked.registerOpenCodeReadyRefreshHandlerMock).toHaveBeenCalledTimes(1);
     expect(mocked.notifyOpencodeReadyIfHealthyMock).toHaveBeenCalledWith("startup");
+  });
+
+  it("initializes mission storage after settings and before mission recovery", async () => {
+    await startBotApp();
+
+    expect(mocked.missionStoreInitializeMock.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mocked.loadSettingsMock.mock.invocationCallOrder[0],
+    );
+    expect(mocked.missionStoreInitializeMock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocked.missionInitializeMock.mock.invocationCallOrder[0],
+    );
   });
 
   it("runs startup health notification even when auto-restart handled startup", async () => {

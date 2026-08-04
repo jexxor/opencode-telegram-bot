@@ -100,6 +100,8 @@ function createTask(partial: Partial<ScheduledTask> = {}): ScheduledTask {
       kind: "cron",
       projectId: "project-1",
       projectWorktree: "D:\\Projects\\Repo",
+      sessionId: "session-1",
+      sessionTitle: "Session 1",
       model: {
         providerID: "openai",
         modelID: "gpt-5",
@@ -125,6 +127,8 @@ function createTask(partial: Partial<ScheduledTask> = {}): ScheduledTask {
     kind: "once",
     projectId: "project-1",
     projectWorktree: "D:\\Projects\\Repo",
+    sessionId: "session-1",
+    sessionTitle: "Session 1",
     model: {
       providerID: "openai",
       modelID: "gpt-5",
@@ -165,6 +169,30 @@ describe("app/services/scheduled-task-runtime-service", () => {
     mocked.removeScheduledTaskMock.mockReset();
     mocked.cleanupIgnoresMock.mockReset();
     mocked.cleanupIgnoresMock.mockResolvedValue(0);
+  });
+
+  it("disables persisted tasks that are not bound to a session", async () => {
+    ({ ScheduledTaskRuntime: ScheduledTaskRuntimeClass } =
+      await import("../../../src/app/services/scheduled-task-runtime-service.js"));
+    const runtime = new ScheduledTaskRuntimeClass();
+    mocked.tasks = [
+      {
+        ...createTask(),
+        sessionId: undefined,
+        sessionTitle: undefined,
+      } as unknown as ScheduledTask,
+    ];
+
+    await runtime.initialize({ api: {} } as Bot<Context>, await createDeliverySender());
+
+    expect(mocked.replaceScheduledTasksMock).toHaveBeenCalled();
+    expect(mocked.tasks[0]).toMatchObject({
+      nextRunAt: null,
+      lastStatus: "error",
+      lastError: expect.stringContaining("not bound to a session"),
+    });
+    expect(mocked.executeScheduledTaskMock).not.toHaveBeenCalled();
+    runtime.__resetForTests();
   });
 
   it("queues scheduled task result while foreground session is busy and flushes later", async () => {

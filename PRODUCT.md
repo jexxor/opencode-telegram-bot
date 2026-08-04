@@ -50,6 +50,7 @@ No public inbound ports are required for normal usage.
 ### Task handling
 
 - Send text prompts to OpenCode
+- Bind scheduled tasks to the active session at creation and continue that session for every run
 - Accept voice/audio messages, transcribe via Whisper-compatible STT API, and forward recognized text as prompts
 - Interrupt current task (ESC equivalent)
 - Handle OpenCode questions with inline options and custom text answers
@@ -62,12 +63,14 @@ No public inbound ports are required for normal usage.
 - Hide full model reasoning by default; optionally stream it in the thinking message when explicitly enabled
 - Split long responses into multiple Telegram messages
 - Send code updates as files (size-limited)
+- Show per-session activity statuses (`Working`, `Access request`, `Finished`) and allow switching between concurrently running sessions
 
 ### Session status in chat
 
 - Keep a pinned status message in the chat
 - Show session title, project, model, context usage, and changed files
 - Auto-update status from SSE and tool events
+- Preserve status for all project sessions and replay selected session activity when switching
 - Preserve pinned message ID across bot restarts
 
 ### Security
@@ -85,6 +88,7 @@ No public inbound ports are required for normal usage.
 - Configurable sessions list size (default: 10)
 - Configurable commands list size (default: 10)
 - Configurable scheduled task limit (default: 10)
+- Configurable global mission concurrency limit (default: 8)
 - Configurable bot locale
 - Configurable visibility for thinking content and diff-file attachments
 - Configurable compact output, assistant footer, and TTS modes (`/settings`)
@@ -111,6 +115,11 @@ Current command set:
 - `/settings` - change bot settings
 - `/task` - create a scheduled task
 - `/tasklist` - browse and delete scheduled tasks
+- `/loop` - create an ordered repeating pipeline across selected sessions
+- `/loops` - inspect per-run cycle/time metrics, run, stop, and delete agent loops
+- `/mission` - create a global, project-independent mission graph from repeatable sub-missions and optional root sessions selected across projects; execution is parallel within globally synchronized leaf-to-root levels, and empty no-op missions are valid
+- `/missions` - inspect, run, pause/resume, stop, edit mission structure, and delete global missions
+- Mission panels can create and attach a named root-session swarm in a filesystem directory selected within `OPEN_BROWSER_ROOTS`
 - `/rename` - rename current session
 - `/commands` - browse and run custom commands (plus built-ins like `init` and `review`)
 - `/skills` - browse and run OpenCode skills
@@ -155,8 +164,11 @@ Model picker behavior:
 - [x] Built-in and custom command catalog access (`/commands`)
 - [x] Skills catalog access (`/skills`)
 - [x] Scheduled task creation flow (`/task`)
-- [x] Scheduled task runtime execution with deferred Telegram delivery
+- [x] Scheduled task runtime execution in the session active during task creation, with deferred Telegram delivery
 - [x] Scheduled task list and deletion flow (`/tasklist`)
+- [x] Persistent ordered multi-session agent loops (`/loop`, `/loops`)
+- [x] Persistent nested missions with a user-provided shared prompt, leaf-to-root execution, and server-side concurrency control (`/mission`, `/missions`)
+- [x] Optional agent-loop timeout and terminal completion marker
 - [x] Persistent settings between restarts (`settings.json`)
 - [x] UI localization support via i18n files
 - [x] Service message visibility controls (thinking content and diff-file attachments)

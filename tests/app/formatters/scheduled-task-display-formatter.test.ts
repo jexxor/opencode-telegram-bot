@@ -9,6 +9,8 @@ function createCronTask(cron: string): ScheduledTask {
     cron,
     projectId: "project-id",
     projectWorktree: "D:\\Projects\\Repo",
+    sessionId: "session-1",
+    sessionTitle: "Session 1",
     model: {
       providerID: "openai",
       modelID: "gpt-5",
@@ -34,6 +36,8 @@ function createOnceTask(runAt: string): ScheduledTask {
     runAt,
     projectId: "project-id",
     projectWorktree: "D:\\Projects\\Repo",
+    sessionId: "session-1",
+    sessionTitle: "Session 1",
     model: {
       providerID: "openai",
       modelID: "gpt-5",

@@ -1,8 +1,14 @@
 import path from "node:path";
 import type { ModelInfo } from "../types/model.js";
 import type { ProjectInfo } from "../types/project.js";
-import type { SessionDirectoryCacheInfo, SessionInfo } from "../types/session.js";
+import type {
+  QueuedSessionPrompt,
+  SessionDirectoryCacheInfo,
+  SessionInfo,
+} from "../types/session.js";
 import { cloneScheduledTask, type ScheduledTask } from "../types/scheduled-task.js";
+import { cloneAgentLoop, type AgentLoop } from "../types/loop.js";
+import { cloneMission, type Mission } from "../types/mission.js";
 import type {
   ResponseStreamingMode,
   ScheduledTaskSessionIgnoreInfo,
@@ -32,7 +38,11 @@ function getSettingsBackupFilePath(): string {
 
 // Lives next to the target file so the rename never crosses a volume boundary.
 function getSettingsTempFilePath(): string {
-  return `${getSettingsFilePath()}.tmp`;
+  return `${getSettingsFilePath()}.tmp.${process.pid}`;
+}
+
+function getSettingsBackupTempFilePath(): string {
+  return `${getSettingsBackupFilePath()}.tmp.${process.pid}`;
 }
 
 // Set when settings were recovered from the backup: the target file still holds
@@ -58,10 +68,7 @@ async function readSettingsFile(): Promise<Settings> {
     return await readSettingsFileAt(settingsFilePath);
   } catch (primaryError) {
     if (!isFileNotFound(primaryError)) {
-      logger.warn(
-        `[SettingsManager] Cannot read settings file ${settingsFilePath}:`,
-        primaryError,
-      );
+      logger.warn(`[SettingsManager] Cannot read settings file ${settingsFilePath}:`, primaryError);
     }
 
     try {
@@ -90,6 +97,7 @@ async function writeSettingsFileAtomically(settings: Settings): Promise<void> {
   const fs = await import("fs/promises");
   const settingsFilePath = getSettingsFilePath();
   const tempFilePath = getSettingsTempFilePath();
+  const backupTempFilePath = getSettingsBackupTempFilePath();
 
   await fs.mkdir(path.dirname(settingsFilePath), { recursive: true });
 
@@ -98,7 +106,8 @@ async function writeSettingsFileAtomically(settings: Settings): Promise<void> {
 
     if (!skipNextBackupRotation) {
       try {
-        await fs.rename(settingsFilePath, getSettingsBackupFilePath());
+        await fs.copyFile(settingsFilePath, backupTempFilePath);
+        await fs.rename(backupTempFilePath, getSettingsBackupFilePath());
       } catch (error) {
         // Nothing to back up on the very first write.
         if (!isFileNotFound(error)) {
@@ -110,9 +119,13 @@ async function writeSettingsFileAtomically(settings: Settings): Promise<void> {
     await fs.rename(tempFilePath, settingsFilePath);
     skipNextBackupRotation = false;
   } catch (error) {
-    await fs.rm(tempFilePath, { force: true }).catch(() => {
-      // Best-effort cleanup of the temporary file.
-    });
+    await Promise.all(
+      [tempFilePath, backupTempFilePath].map((filePath) =>
+        fs.rm(filePath, { force: true }).catch(() => {
+          // Best-effort cleanup of temporary files.
+        }),
+      ),
+    );
     throw error;
   }
 }
@@ -120,19 +133,11 @@ async function writeSettingsFileAtomically(settings: Settings): Promise<void> {
 let settingsWriteQueue: Promise<void> = Promise.resolve();
 
 function writeSettingsFile(settings: Settings): Promise<void> {
-  settingsWriteQueue = settingsWriteQueue
-    .catch(() => {
-      // Keep write queue alive after failed writes.
-    })
-    .then(async () => {
-      try {
-        await writeSettingsFileAtomically(settings);
-      } catch (err) {
-        logger.error("[SettingsManager] Error writing settings file:", err);
-      }
-    });
-
-  return settingsWriteQueue;
+  const operation = settingsWriteQueue.then(() => writeSettingsFileAtomically(settings));
+  settingsWriteQueue = operation.catch((error) => {
+    logger.error("[SettingsManager] Error writing settings file:", error);
+  });
+  return operation;
 }
 
 // Awaits the writes queued at the moment of the call; writes queued later are not
@@ -306,6 +311,51 @@ export function setScheduledTaskSessionIgnores(
   return writeSettingsFile(currentSettings);
 }
 
+export function getQueuedSessionPrompts(): QueuedSessionPrompt[] {
+  return (currentSettings.queuedSessionPrompts ?? []).map((prompt) => ({
+    ...prompt,
+    model: { ...prompt.model },
+  }));
+}
+
+export function setQueuedSessionPrompts(prompts: QueuedSessionPrompt[]): Promise<void> {
+  currentSettings.queuedSessionPrompts = prompts.map((prompt) => ({
+    ...prompt,
+    model: { ...prompt.model },
+  }));
+  return writeSettingsFile(currentSettings);
+}
+
+export function getAgentLoops(): AgentLoop[] {
+  return (currentSettings.agentLoops ?? []).map(cloneAgentLoop);
+}
+
+export function setAgentLoops(loops: AgentLoop[]): Promise<void> {
+  currentSettings.agentLoops = loops.map(cloneAgentLoop);
+  return writeSettingsFile(currentSettings);
+}
+
+export async function getLegacyMissions(): Promise<Mission[]> {
+  const backupSettings = await readSettingsFileAt(getSettingsBackupFilePath()).catch(() => null);
+  const missionsById = new Map<string, Mission>();
+  for (const missions of [backupSettings?.missions, currentSettings.missions]) {
+    for (const mission of missions ?? []) {
+      const existing = missionsById.get(mission.id);
+      const existingUpdatedAt = existing ? Date.parse(existing.updatedAt) : 0;
+      const candidateUpdatedAt = Date.parse(mission.updatedAt);
+      if (!existing || candidateUpdatedAt >= existingUpdatedAt) {
+        missionsById.set(mission.id, cloneMission(mission));
+      }
+    }
+  }
+  return [...missionsById.values()];
+}
+
+export function clearLegacyMissions(): Promise<void> {
+  delete currentSettings.missions;
+  return writeSettingsFile(currentSettings);
+}
+
 export function __resetSettingsForTests(): void {
   currentSettings = {};
   settingsWriteQueue = Promise.resolve();
@@ -355,9 +405,7 @@ function applyInitialSettingsPreset(preset: Record<string, unknown>): void {
     } else {
       // Boolean settings: compactOutputMode, showThinkingContent, showAssistantRunFooter, sendDiffFileAttachments
       if (typeof value !== "boolean") {
-        throw new Error(
-          `INITIAL_SETTINGS_PRESET: "${key}" must be a boolean.`,
-        );
+        throw new Error(`INITIAL_SETTINGS_PRESET: "${key}" must be a boolean.`);
       }
       switch (key) {
         case "compactOutputMode":

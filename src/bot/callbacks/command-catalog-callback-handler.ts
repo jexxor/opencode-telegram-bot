@@ -17,6 +17,7 @@ import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { foregroundSessionState } from "../../app/managers/foreground-session-state-manager.js";
+import { sessionStatusManager } from "../../app/managers/session-status-manager.js";
 import { assistantRunState } from "../../app/managers/assistant-run-state-manager.js";
 import {
   attachToSession,
@@ -276,6 +277,7 @@ export async function executeCommand(
       : undefined;
 
   foregroundSessionState.markBusy(session.id, session.directory);
+  sessionStatusManager.markWorking(session.id);
   await markAttachedSessionBusy(session.id);
   assistantRunState.startRun(session.id, {
     startedAt: Date.now(),
@@ -303,6 +305,7 @@ export async function executeCommand(
     onSuccess: ({ error }) => {
       if (error) {
         foregroundSessionState.markIdle(session.id);
+        sessionStatusManager.markFinished(session.id);
         void markAttachedSessionIdle(session.id);
         assistantRunState.clearRun(session.id, "session_command_api_error");
         logger.error("[Commands] OpenCode API returned an error for session.command", {
@@ -321,6 +324,7 @@ export async function executeCommand(
     },
     onError: (error) => {
       foregroundSessionState.markIdle(session.id);
+      sessionStatusManager.markFinished(session.id);
       void markAttachedSessionIdle(session.id);
       assistantRunState.clearRun(session.id, "session_command_background_error");
       logger.error("[Commands] session.command background task failed", {

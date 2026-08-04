@@ -1,490 +1,279 @@
-# OpenCode Telegram Bot
+# OpenCode Telegram Bot Fork
 
-[![npm version](https://img.shields.io/npm/v/@grinev/opencode-telegram-bot)](https://www.npmjs.com/package/@grinev/opencode-telegram-bot)
-[![CI](https://github.com/grinev/opencode-telegram-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/grinev/opencode-telegram-bot/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org)
-[![Follow updates](https://img.shields.io/badge/-Follow%20updates-333333?logo=x)](https://x.com/grin_rus)
-[![Community](https://img.shields.io/badge/Community-Telegram-26A5E4?logo=telegram&logoColor=white)](https://t.me/+Fj_IyKRi6-41MGUy)
+Personal fork of [OpenCode Telegram Bot](https://github.com/grinev/opencode-telegram-bot).
+It connects Telegram to an OpenCode server running on the bot machine.
 
-OpenCode Telegram Bot is a secure Telegram client for [OpenCode](https://opencode.ai) CLI that runs on your local machine.
+This fork is maintained for personal use. It is not published as a ready-to-run
+npm package.
 
-Run AI coding tasks, monitor progress, switch models, and manage sessions from your phone.
+## Fork Changes
 
-No open ports, no exposed APIs. The bot communicates with your local OpenCode server and the Telegram Bot API only.
+Compared with upstream, this fork implements:
 
-Scheduled tasks support. Turns the bot into a lightweight OpenClaw alternative for OpenCode users.
+- **Markdown diff files**: `write` and `edit` tool results are sent as `.md`
+  documents instead of `.txt` files. Their content is wrapped in triple
+  backticks so Telegram Markdown does not reinterpret file contents.
+- **Concurrent session tracking**: sessions in the selected project are tracked
+  independently instead of treating one busy session as the only active state.
+- **Session status display**: `/sessions`, `/status`, and the pinned status
+  message show each tracked session as `Working`, `Access`, or `Finished`.
+- **Session switching while busy**: `/sessions`, `/new`, and session-selection
+  buttons remain usable while another session is running.
+- **Busy-state cleanup**: idle and error events from non-current sessions clear
+  their stale local busy state.
+- **Session-bound scheduled tasks**: `/task` captures the open session and every
+  run continues that conversation instead of creating an execution session.
+- **Agent loops**: `/loop` builds an ordered, repeating session pipeline with a
+  shared prompt and fixed interval; `/loops` runs, stops, or deletes pipelines.
+- **Nested missions**: `/mission` composes reusable sub-missions and OpenCode
+  session trees; `/missions` runs and manages them with bounded concurrency.
+- **Bot update filtering**: updates originating from the bot itself are ignored.
+- **No npm publishing**: the upstream automatic publish workflow was removed.
+- **Fork version**: package version is `0.22.5-fork`.
 
-Platforms: macOS, Windows, Linux
+The rest of the bot functionality comes from upstream.
 
-Languages: English (`en`), العربية (`ar`), Deutsch (`de`), Español (`es`), Français (`fr`), Português (Brasil) (`pt`), Русский (`ru`), 简体中文 (`zh`)
+## Upstream Functionality Included
 
-<p align="center">
-  <img src="assets/screencast.gif" width="45%" alt="OpenCode Telegram Bot screencast" />
-</p>
+- Send prompts to OpenCode and receive responses in Telegram.
+- Create, select, rename, detach, abort, revert, and fork sessions.
+- Select projects and git worktrees.
+- Switch model, agent, variant, and context settings.
+- Follow an OpenCode session running in another TUI or terminal client.
+- Receive questions, permission requests, and background-session notifications.
+- View live progress and pinned project/session status.
+- Run built-in and custom commands, skills, and MCP actions.
+- Schedule one-time or recurring tasks bound to the active session.
+- Send images, documents, and text files to OpenCode.
+- Optionally use voice transcription and audio replies.
+- Browse and download project files with `/ls`.
+- Use localized UI: `en`, `ar`, `de`, `es`, `fr`, `pt`, `ru`, `zh`.
+- Restrict access to one Telegram user ID.
 
-> I use [boardown](https://github.com/grinev/boardown), my open-source Markdown-based task board, to plan and track this project. It stores tasks in plain `.md` files and can be used as a VS Code extension or a desktop app.
+## Rebase Workflow
 
-## Features
+`.github/workflows/rebase-upstream.yml` is the fork's only automated workflow.
+It is not a test or release pipeline.
 
-- **Remote coding** — send prompts to OpenCode from anywhere, receive complete results with code sent as files
-- **Session management** — create new sessions or continue existing ones, just like in the TUI
-- **Track live session** — follow a live OpenCode CLI session; see [Track Existing Session](#track-existing-session)
-- **Background session notifications** — get short notifications when detached or non-current sessions in the current project/worktree reply, ask questions, or request permissions
-- **Live status** — pinned message with current project/worktree, model, context usage, and changed files list, updated in real time
-- **Model switching** — pick models from OpenCode favorites and recent history directly in the chat (favorites are shown first)
-- **Agent modes** — switch between Plan and Build modes on the fly
-- **Subagent activity** — watch live subagent progress in chat, including the current task, agent, model, and active tool step
-- **Custom Commands** — run OpenCode custom commands (and built-ins like `init`/`review`) from an inline menu with confirmation
-- **Skills Catalog** — browse OpenCode skills from an inline menu and run them immediately or with arguments in the next message
-- **Interactive Q&A** — answer agent questions and approve permissions via inline buttons
-- **Runtime settings** — use `/settings` to change runtime preferences; see [Runtime Settings](#runtime-settings)
-- **Voice prompts** — send voice/audio messages, transcribe them via a Whisper-compatible API, and optionally enable spoken replies in `/settings`
-- **File attachments** — send images, PDF documents, and text-based files to OpenCode, including multiple files in one Telegram album
-- **Scheduled tasks** — schedule prompts to run later or on a recurring interval; see [Scheduled Tasks](#scheduled-tasks)
-- **Context control** — compact context when it gets too large, right from the chat
-- **Input flow control** — when an interactive flow is active, the bot accepts only relevant input to keep context consistent and avoid accidental actions
-- **Git worktree switching** — browse and switch between existing git worktrees for the current repository with `/worktree`
-- **Security** — strict user ID whitelist; no one else can access your bot, even if they find it
-- **Localization** — UI localization is supported for multiple languages (`BOT_LOCALE`)
-- **Interactive file browser** — use `/ls` to browse files and directories inside the current project, open subdirectories, go back, and download files by tapping them
+It runs monthly on the first day at `03:00 UTC` or manually through GitHub Actions and:
 
-Planned features currently in development are listed in [Current Task List](PRODUCT.md#current-task-list).
+1. Checks out fork `main` with full history.
+2. Fetches `main` from `https://github.com/grinev/opencode-telegram-bot.git`.
+3. Rebases fork `main` onto upstream `main`.
+4. Pushes the rebased branch back with `--force-with-lease`.
 
-## Prerequisites
+The reason is simple: the author does not actively maintain this project. The
+fork exists for personal use, so automatic rebasing keeps it close to upstream
+without requiring manual synchronization. If upstream changes conflict with
+fork changes, the workflow fails and the conflict must be resolved manually.
 
-- **Node.js 22+** — [download](https://nodejs.org)
-- **OpenCode** — install from [opencode.ai](https://opencode.ai) or [GitHub](https://github.com/sst/opencode)
-- **Telegram Bot** — you'll create one during setup (takes 1 minute)
+There is no automatic npm publish. The bot is built and run from this source
+repository.
 
-## Quick Start
+## Requirements
 
-### 1. Create a Telegram Bot
+- Node.js 22 or newer
+- npm
+- OpenCode
+- A Telegram bot token from [@BotFather](https://t.me/BotFather)
+- Your numeric Telegram user ID, available from [@userinfobot](https://t.me/userinfobot)
 
-1. Open [@BotFather](https://t.me/BotFather) in Telegram and send `/newbot`
-2. Follow the prompts to choose a name and username
-3. Copy the **bot token** you receive (e.g. `123456:ABC-DEF1234...`)
+## Run From Source
 
-You'll also need your **Telegram User ID** — send any message to [@userinfobot](https://t.me/userinfobot) and it will reply with your numeric ID.
+Clone the fork and install dependencies:
 
-### 2. Start OpenCode Server
+```bash
+git clone https://github.com/jexxor/opencode-telegram-bot.git
+cd opencode-telegram-bot
+npm install
+```
 
-Run the OpenCode server on the same machine where the bot runs:
+Create configuration:
+
+```bash
+cp .env.example .env
+```
+
+Set at least these values in `.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=your-bot-token
+TELEGRAM_ALLOWED_USER_ID=your-telegram-user-id
+OPENCODE_MODEL_PROVIDER=opencode
+OPENCODE_MODEL_ID=big-pickle
+```
+
+Start OpenCode on the same machine:
 
 ```bash
 opencode serve
 ```
 
-> The bot connects to the local OpenCode API at `http://localhost:4096` by default.
+The default OpenCode API URL is `http://localhost:4096`. Change
+`OPENCODE_API_URL` if needed.
 
-> After the bot is configured, you can also start and stop the local OpenCode server from Telegram with `/opencode_start` and `/opencode_stop`.
-
-### 3. Install & Run
-
-The fastest way — run directly with `npx`:
+Build the bot and run it:
 
 ```bash
-npx @grinev/opencode-telegram-bot@latest
+npm run build
+npx --yes --package . -- opencode-telegram start
 ```
 
-> **Note:** This README tracks the `main` branch, which may include unreleased changes. The latest npm release may not include every feature described here yet. See [recent commits on `main`](https://github.com/grinev/opencode-telegram-bot/commits/main).
+The command runs in the foreground. Start it again after source changes by
+running `npm run build` first. If required configuration is missing, the bot
+opens its setup wizard.
 
-> Quick start is for npm usage. You do not need to clone this repository. If you run this command from the source directory (repository root), it may fail with `opencode-telegram: not found`. To run from sources, use the [Development](#development) section.
+## Main Commands
 
-If required configuration is not supplied through process environment variables or an `.env` file, an interactive wizard will guide you through setup. It asks for interface language first, then your bot token, user ID, OpenCode API URL, and optional OpenCode server credentials (username/password). After that, you're ready to go. Open your bot in Telegram and start sending tasks.
+| Command           | Purpose                                            |
+| ----------------- | -------------------------------------------------- |
+| `/status`         | Show server, project, model, and session status    |
+| `/new`            | Create a session                                   |
+| `/sessions`       | List and switch sessions                           |
+| `/abort`          | Abort the current task                             |
+| `/detach`         | Stop following a session without stopping its task |
+| `/messages`       | Browse messages, revert, or fork                   |
+| `/projects`       | Select a project                                   |
+| `/worktree`       | Select a git worktree                              |
+| `/open`           | Add a project by browsing directories              |
+| `/ls`             | Browse project files                               |
+| `/settings`       | Change runtime settings                            |
+| `/rename`         | Rename the current session                         |
+| `/commands`       | Run custom commands                                |
+| `/skills`         | Run OpenCode skills                                |
+| `/mcps`           | Browse and toggle MCP servers                      |
+| `/task`           | Create a scheduled task                            |
+| `/tasklist`       | List or delete scheduled tasks                     |
+| `/loop`           | Create a repeating multi-session pipeline           |
+| `/loops`          | Manage agent loops                                  |
+| `/mission`        | Create a nested mission                             |
+| `/missions`       | Run and manage missions                             |
+| `/opencode_start` | Start a local OpenCode server                      |
+| `/opencode_stop`  | Stop a local OpenCode server                       |
+| `/help`           | Show available commands                            |
 
-#### Alternative: Global Install
+Regular text messages are sent to the selected OpenCode session when no
+interactive flow is waiting for input.
 
-```bash
-npm install -g @grinev/opencode-telegram-bot
-opencode-telegram start
-```
+Scheduled tasks require an active session. A run waits for its bound session to
+become idle, then appends its prompt and result to that existing conversation.
 
-`start` runs in the foreground by default. This is the recommended mode for `systemd`, Docker, local debugging, and other external process managers.
+### Agent Loops
 
-To run the bot in the built-in background mode instead:
+Agent loops enqueue one shared prompt across an ordered session sequence. A
+session may appear multiple times, the first step starts immediately, and busy
+sessions retain their steps in the persistent prompt queue. An optional timeout
+stops the loop after N minutes and resets on every Run.
 
-```bash
-opencode-telegram start --daemon
-opencode-telegram status
-opencode-telegram stop
-```
+Each run has its own generation. Prompts and terminal responses left over from
+an older generation cannot affect a restarted loop. Terminal markers are also
+detected in background sessions. Loop prompts ask the assistant to emit
+`STOP_LOOP_REASON_TERMINAL` on its own line when all goal work is complete; that
+marker stops only the originating generation.
 
-> Built-in daemon mode is intended for standalone npm installs without an external supervisor. For `systemd`, `pm2`, or Docker, keep using `opencode-telegram start` without `--daemon`.
+### Missions
 
-For Linux `systemd` setup, see [`docs/LINUX_SYSTEMD_SETUP.md`](./docs/LINUX_SYSTEMD_SETUP.md).
+Missions are global orchestration objects, not project-owned records. `/mission`
+and `/missions` work without a selected project, and one mission may manage root
+sessions from multiple projects. Legacy persisted `projectId` fields are ignored.
 
-To reconfigure at any time:
+`/mission` opens a wizard for:
 
-```bash
-opencode-telegram config
-```
+1. Mission name and description.
+2. Sub-mission graph construction. The same sub-mission may be added repeatedly
+   as independent occurrences.
+3. Optional root OpenCode session selection through project -> session menus.
+   Selections may include sessions from multiple projects. A mission with
+   sub-missions needs no root session of its own.
 
-## Supported Platforms
+Missions may also be empty. An empty mission is a valid no-op graph vertex that
+can be nested, repeated, edited later, or run without starting any sessions.
 
-| Platform | Status                                       |
-| -------- | -------------------------------------------- |
-| macOS    | Fully supported                              |
-| Windows  | Fully supported                              |
-| Linux    | Fully supported (tested on Ubuntu 24.04 LTS) |
+Mission shapes have explicit semantics:
 
-## Bot Commands
+- Sub-missions with no root sessions form a logical connector.
+- Root sessions with no sub-missions form a working leaf.
+- No sub-missions and no root sessions form a no-op placeholder.
+- Repeated sub-mission IDs are independent occurrences. Adding the same mission
+  three times executes it three times before the parent level can start.
 
-| Command           | Description                                             |
-| ----------------- | ------------------------------------------------------- |
-| `/status`         | Server health, current project, session, and model info |
-| `/new`            | Create a new session                                    |
-| `/abort`          | Abort the current task                                  |
-| `/detach`         | Detach from the current session without stopping it     |
-| `/sessions`       | Browse and switch between recent sessions               |
-| `/messages`       | Browse user messages, revert or fork from a previous state     |
-| `/projects`       | Switch between OpenCode projects                        |
-| `/worktree`       | Switch between existing git worktrees                   |
-| `/open`           | Add a project by browsing directories                   |
-| `/ls`             | List directory contents, then tap to open or download   |
-| `/settings`       | Change bot settings                                     |
-| `/rename`         | Rename the current session                              |
-| `/commands`       | Browse and run custom commands                          |
-| `/skills`         | Browse and run OpenCode skills                          |
-| `/mcps`           | Browse and toggle MCP servers                           |
-| `/task`           | Create a scheduled task                                 |
-| `/tasklist`       | Browse and delete scheduled tasks                       |
-| `/opencode_start` | Start the local OpenCode server on the bot machine      |
-| `/opencode_stop`  | Stop the local OpenCode server on the bot machine       |
-| `/help`           | Show available commands                                 |
+On every full run, mission execution levels are calculated from the leaves:
+leaves are level zero and each parent is one level above its deepest child. All
+mission occurrences on one level start in parallel. A global barrier prevents
+the next parent level from starting until the entire lower level has finished.
+Within each mission vertex, explicitly selected root sessions run in parallel.
+OpenCode child sessions are controlled by their parent agent and are not
+prompted separately by the bot. All actual session prompts share the global
+`MISSION_CONCURRENCY_LIMIT` semaphore.
 
-Any regular text message is sent as a prompt to the coding agent only when no blocking interaction is active. Voice/audio messages are transcribed and then sent as prompts when STT is configured.
+External-directory permission requests from an active mission root or one of
+its dynamic child agents are rejected automatically. The requesting session,
+not its parent, is aborted and relaunched with instructions to stay inside its
+working directory and read `ROLE.md`. Each session gets two retries; another
+request disables only that agent and records a failed session run while the
+rest of the mission continues. Telegram sends a red notification for every
+retry and for the terminal rejection. Sessions outside the active mission tree
+keep the normal interactive permission flow.
 
-When the current project is a git repository, `/worktree` shows the existing worktrees for that repository. Status and pinned updates display the main project path with the active branch, and show a separate `Worktree` line when a linked worktree is selected.
+Before execution starts, the bot asks for one required shared message. The
+user-provided text is sent unchanged to every explicitly selected root session
+reached through the mission and nested sub-missions.
 
-## Message History, Revert, and Fork
+Run options accept a timeout in whole minutes (`0` means no timeout) and a full
+run count (`0` means one run), then asks for the shared message. Pause lets
+already active sessions finish but blocks new levels. Resume continues saved
+progress. Stop aborts active sessions and ends the run.
 
-The `/messages` command displays all user messages in the current session, sorted by time (newest first). Select a message to view its full text and access the **Revert** and **Fork** actions.
+`/missions` shows mission structure, root sessions, dynamically created child
+agents, live agent status, run/session statistics, timeout, timestamps, and
+errors. Child agents remain available for navigation even though the bot does
+not execute them separately. The panel also provides Run, Pause/Resume, Stop,
+editing for names, descriptions, sub-missions, and root sessions, refresh, and
+archiving.
+Structural editing is disabled while a mission is running or paused. Archiving
+first lists parent missions, then removes every active reference to the archived
+mission after confirmation. Mission records are never physically deleted.
 
-**Revert** rolls back the session state to the selected message, discarding all subsequent messages and agent responses. This is useful when you want to retry a different approach from a specific point in the conversation.
+The mission panel can also create new root sessions. The user browses a directory
+inside `OPEN_BROWSER_ROOTS`, selects it, and enters a swarm size (`0` means the
+default single session). Sessions are attached to the mission and named after it:
+`Mission`, `Mission 2`, `Mission 3`, and so on. Successfully created sessions are
+retained if a later session in the same swarm fails to create.
 
-**Fork** creates a new session that branches from the selected message. The original session remains unchanged, and you can continue working in the new forked session. This is useful when you want to explore an alternative approach without losing the original conversation history.
-
-## Scheduled Tasks
-
-Scheduled tasks let you prepare prompts in advance and run them automatically later or on a recurring schedule. This is useful for periodic checks, routine code maintenance, or tasks you want OpenCode to execute while you are away from your computer. Use `/task` to create a scheduled task and `/tasklist` to review or delete existing ones.
-
-- Each task is created from the currently selected OpenCode project and model
-- Scheduled executions currently always run with the `build` agent
-- Tasks run outside your active chat session, so they do not interrupt or affect the current session flow
-- The minimum recurring interval is 5 minutes
-- If a recurring task is still running when its next interval arrives, the bot does not start a parallel copy of the same task and does not replay missed intervals later
-- By default, the bot waits up to 120 minutes for one scheduled task run; change this with `SCHEDULED_TASK_EXECUTION_TIMEOUT_MINUTES` if needed
-- Up to 10 scheduled tasks can exist at once by default; change this with `TASK_LIMIT` in your `.env`
-
-## Track Existing Session
-
-After you create a new session, select an existing one, or let the bot auto-create one from your first prompt, the bot automatically starts tracking that session. It follows live events from the same OpenCode CLI session, shows external text input sent from another TUI client, and lets you continue the same session from Telegram.
-
-For this to work, the console OpenCode instance must be started on the same port the bot connects to. By default, OpenCode starts on a random port, so use one of the setups below.
-
-- **Single TUI, simplest setup** — start OpenCode on a fixed port: `opencode --port 4096`
-- Point the bot to `http://127.0.0.1:4096`, then select or create the same session in Telegram
-- **Multiple TUI clients, shared backend** — start one backend: `opencode serve --port 4096`
-- In each terminal client, connect with: `opencode attach http://127.0.0.1:4096`
-- In the bot, select or create the same session to start tracking it automatically
+Mission definitions and statistics persist transactionally in `missions.sqlite`.
+Existing mission data is migrated once from `settings.json`. An active or paused
+run is marked stopped if the bot restarts; execution is not replayed automatically.
 
 ## Configuration
 
-### Localization
+All supported environment variables are documented in `.env.example`. Common
+settings include:
 
-- Supported locales: `en`, `ar`, `de`, `es`, `fr`, `pt`, `ru`, `zh`
-- The setup wizard asks for language first
-- You can change locale later with `BOT_LOCALE`
+- `OPENCODE_API_URL`: OpenCode server URL.
+- `OPENCODE_SERVER_USERNAME` and `OPENCODE_SERVER_PASSWORD`: optional server auth.
+- `BOT_LOCALE`: UI language.
+- `SESSIONS_LIST_LIMIT`: number of sessions per page.
+- `OPEN_BROWSER_ROOTS`: comma-separated roots available to `/open`; for example,
+  `~,/opt` exposes both home and `/opt` while keeping other paths blocked.
+- `MISSION_CONCURRENCY_LIMIT`: maximum concurrently executing mission sessions
+  across all missions (default: `8`).
+- `CODE_FILE_MAX_SIZE_KB`: maximum size of generated code-file attachments.
+- `TRACK_BACKGROUND_SESSIONS`: background-session tracking toggle.
+- `STT_API_URL` and `STT_API_KEY`: optional voice transcription.
+- `TTS_API_URL` and `TTS_API_KEY`: optional audio replies.
+- `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`.
 
-### Environment Variables
+Keep `.env` private. It contains the Telegram bot token.
 
-Configuration can be provided through process environment variables or an `.env` file. Process environment values take precedence. When installed via npm, the configuration wizard handles any missing required values and stores the generated `.env` file in your platform's app data directory:
-
-- **macOS:** `~/Library/Application Support/opencode-telegram-bot/.env`
-- **Windows:** `%APPDATA%\opencode-telegram-bot\.env`
-- **Linux:** `~/.config/opencode-telegram-bot/.env`
-
-| Variable                                   | Description                                                                                                           | Required | Default                  |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | :------: | ------------------------ |
-| `TELEGRAM_BOT_TOKEN`                       | Bot token from @BotFather                                                                                             |   Yes    | —                        |
-| `TELEGRAM_ALLOWED_USER_ID`                 | Your numeric Telegram user ID                                                                                         |   Yes    | —                        |
-| `TELEGRAM_PROXY_URL`                       | Proxy URL for Telegram API (SOCKS5/HTTP)                                                                              |    No    | —                        |
-| `TELEGRAM_API_ROOT`                        | Custom Telegram Bot API root URL (e.g. nginx reverse-proxying `api.telegram.org`); applied to API calls and file downloads | No | `https://api.telegram.org` |
-| `TELEGRAM_PROXY_SECRET`                    | Shared secret sent as `X-Proxy-Secret` header on every Bot API request and file download (used with `TELEGRAM_API_ROOT`) | No | —                        |
-| `TELEGRAM_FORCE_IPV4`                      | Force IPv4 for direct Telegram API and file requests; useful when IPv6 DNS works but outbound IPv6 is broken           |    No    | `false`                  |
-| `OPENCODE_API_URL`                         | OpenCode server URL                                                                                                   |    No    | `http://localhost:4096`  |
-| `OPENCODE_AUTO_RESTART_ENABLED`            | Automatically restart a local OpenCode server when health-checks fail                                                 |    No    | `false`                  |
-| `OPENCODE_MONITOR_INTERVAL_SEC`            | Health monitor interval in seconds when OpenCode auto-restart is enabled                                              |    No    | `300`                    |
-| `OPENCODE_SERVER_USERNAME`                 | Server auth username                                                                                                  |    No    | `opencode`               |
-| `OPENCODE_SERVER_PASSWORD`                 | Server auth password                                                                                                  |    No    | —                        |
-| `OPENCODE_MODEL_PROVIDER`                  | Default model provider                                                                                                |   Yes    | `opencode`               |
-| `OPENCODE_MODEL_ID`                        | Default model ID                                                                                                      |   Yes    | `big-pickle`             |
-| `BOT_LOCALE`                               | Bot UI language (supported locale code, e.g. `en`, `ar`, `de`, `es`, `fr`, `pt`, `ru`, `zh`)                          |    No    | `en`                     |
-| `SESSIONS_LIST_LIMIT`                      | Sessions per page in `/sessions`                                                                                      |    No    | `10`                     |
-| `MESSAGES_LIST_LIMIT`                      | User messages per page in `/messages`                                                                                 |    No    | `10`                     |
-| `PROJECTS_LIST_LIMIT`                      | Projects per page in `/projects`                                                                                      |    No    | `10`                     |
-| `OPEN_BROWSER_ROOTS`                       | Comma-separated paths `/open` is allowed to browse (supports `~`)                                                     |    No    | `~` (home directory)     |
-| `COMMANDS_LIST_LIMIT`                      | Items per page in `/commands` and `/skills`                                                                           |    No    | `10`                     |
-| `MODELS_LIST_LIMIT`                        | Providers and provider models per page in the model picker                                                            |    No    | `10`                     |
-| `TASK_LIMIT`                               | Maximum number of scheduled tasks that can exist at once                                                              |    No    | `10`                     |
-| `SCHEDULED_TASK_EXECUTION_TIMEOUT_MINUTES` | Maximum time the bot waits for one scheduled task run before marking it failed                                        |    No    | `120`                    |
-| `SCHEDULED_TASK_DISABLE_NOTIFICATION`      | Send scheduled task result/error messages without Telegram push notifications                                         |    No    | `false`                  |
-| `BASH_TOOL_DISPLAY_MAX_LENGTH`             | Maximum displayed length for `bash` tool commands in Telegram summaries; longer commands are truncated                |    No    | `128`                    |
-| `TRACK_BACKGROUND_SESSIONS`                | Track detached/non-current sessions in the current selected project/worktree and send short notifications             |    No    | `true`                   |
-| `RESPONSE_STREAM_THROTTLE_MS`              | Stream update throttle in milliseconds for assistant, thinking, and tool message edits                                |    No    | `1000`                   |
-| `MESSAGE_FORMAT_MODE`                      | Assistant reply formatting mode: `markdown` (Telegram MarkdownV2) or `raw`                                            |    No    | `markdown`               |
-| `MESSAGE_MERGE_WINDOW_MS`                  | Merge Telegram-split long text messages into one prompt after this wait window (ms); `0` disables merging             |    No    | `1500`                   |
-| `INITIAL_SETTINGS_PRESET`                  | JSON object that seeds default `/settings` values on first run (keys not yet persisted); see [Runtime Settings](#runtime-settings) |    No    | `{}`                     |
-| `CODE_FILE_MAX_SIZE_KB`                    | Max file size (KB) to send as document                                                                                |    No    | `100`                    |
-| `STT_API_URL`                              | Whisper-compatible API base URL (enables voice/audio transcription)                                                   |    No    | —                        |
-| `STT_API_KEY`                              | API key for your STT provider                                                                                         |    No    | —                        |
-| `STT_MODEL`                                | STT model name passed to `/audio/transcriptions`                                                                      |    No    | `whisper-large-v3-turbo` |
-| `STT_LANGUAGE`                             | Optional language hint (empty = provider auto-detect)                                                                 |    No    | —                        |
-| `STT_REQUEST_FORMAT`                       | STT request format: `multipart` (standard OpenAI/Groq Whisper) or `json` (base64 `input_audio` body, e.g. OpenRouter) |    No    | `multipart`              |
-| `STT_NOTE_PROMPT`                          | Optional note prepended to the LLM prompt as `[Note: ...]` for voice transcriptions; empty / `false` / `0` disable it |    No    | —                        |
-| `DOC_EXTRACTOR_URL`                        | Document text extraction API URL (enables PDF/DOCX/PPTX extraction)                                                    |    No    | —                        |
-| `DOC_EXTRACTOR_API_KEY`                    | API key for the document extractor (optional for self-hosted extractors)                                                |    No    | —                        |
-| `TTS_PROVIDER`                             | TTS provider: `openai` for OpenAI-compatible APIs, `elevenlabs` for ElevenLabs, or `google` for Google Cloud TTS      |    No    | `openai`                 |
-| `TTS_API_URL`                              | TTS API base URL for OpenAI-compatible APIs or ElevenLabs                                                             |    No    | —                        |
-| `TTS_API_KEY`                              | TTS API key for OpenAI-compatible APIs or ElevenLabs                                                                  |    No    | —                        |
-| `TTS_MODEL`                                | TTS model name. Passed as `model` for OpenAI-compatible APIs and `model_id` for ElevenLabs                            |    No    | `gpt-4o-mini-tts`        |
-| `TTS_VOICE`                                | TTS voice name or ElevenLabs voice ID. Defaults to `alloy`, `21m00Tcm4TlvDq8ikWAM`, or `en-US-Studio-O` by provider   |    No    | provider-specific        |
-| `GOOGLE_APPLICATION_CREDENTIALS`           | Path to a Google Cloud service account JSON key file for `TTS_PROVIDER=google`                                        |    No    | —                        |
-| `LOG_LEVEL`                                | Log level (`debug`, `info`, `warn`, `error`)                                                                          |    No    | `info`                   |
-| `LOG_RETENTION`                            | Number of log files to keep: launch files in `sources`, daily files in `installed`                                    |    No    | `10`                     |
-
-> **Keep your `.env` file private.** It contains your bot token. Never commit it to version control.
-
-Logs are written to `./logs` when running from sources and to the runtime config directory `logs/` folder in `installed` mode. Log rotation depends on runtime mode: `sources` creates one file per bot launch, while `installed` appends to one file per day. Old log files are removed according to `LOG_RETENTION`.
-
-### Runtime Settings
-
-Runtime preferences are changed from `/settings` and stored in `settings.json`:
-
-- Compact output mode
-- Thinking content display
-- Assistant run footer display
-- Diff file attachments
-- Response streaming mode: `edit` or `draft (experimental)`; applies only to final assistant replies, not thinking messages
-- Audio replies: `off`, `all`, or `auto` when TTS is configured
-
-You can seed the initial defaults for any of these settings without hard-coding them in your Docker image by setting `INITIAL_SETTINGS_PRESET` to a JSON object. Only keys not yet persisted in `settings.json` are affected — settings the user has already changed via `/settings` are left untouched:
-
-```env
-INITIAL_SETTINGS_PRESET={"showAssistantRunFooter":false,"compactOutputMode":true,"ttsMode":"auto"}
-```
-
-Settings are written atomically: the new content goes to a temporary file that then replaces `settings.json`, and the previous version is kept as `settings.json.bak`. A crash during a write can never leave a truncated file — the bot falls back to the backup on the next start. If both `settings.json` and `settings.json.bak` are unreadable, the bot refuses to start instead of overwriting them, and the error names the file so you can fix or remove it manually.
-
-### Reverse Proxy (Optional)
-
-For environments that block `api.telegram.org` but allow your own HTTPS endpoint (corporate networks, restricted regions), you can route Bot API traffic through a reverse proxy you control. This is an alternative to the SOCKS/HTTP forward proxy configured with `TELEGRAM_PROXY_URL`.
-
-Set `TELEGRAM_API_ROOT` to your reverse-proxy URL — both Bot API calls and file downloads (including voice/audio files) will use it. Optionally set `TELEGRAM_PROXY_SECRET` so the bot sends an `X-Proxy-Secret` header your proxy can use to authorize callers.
-
-`.env`:
-
-```env
-TELEGRAM_API_ROOT=https://tg-proxy.yourdomain.com
-TELEGRAM_PROXY_SECRET=some-long-random-string
-```
-
-Example nginx config:
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name tg-proxy.yourdomain.com;
-
-    ssl_certificate     /etc/letsencrypt/live/tg-proxy.yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/tg-proxy.yourdomain.com/privkey.pem;
-
-    access_log off;  # the bot token appears in URL paths
-    client_max_body_size 50m;
-
-    if ($http_x_proxy_secret != "some-long-random-string") { return 403; }
-
-    location / {
-        proxy_pass https://api.telegram.org;
-        proxy_ssl_server_name on;
-        proxy_set_header Host api.telegram.org;
-    }
-}
-```
-
-`TELEGRAM_API_ROOT` and `TELEGRAM_PROXY_URL` are alternative connectivity modes — the former picks the URL the bot connects to (a reverse proxy on your side), while the latter tunnels TCP through a forward proxy. Configure only one of them; the bot rejects using both at startup.
-
-### Force IPv4 for Telegram (Optional)
-
-If the bot fails during startup with errors such as `Network request for 'setMyCommands' failed` or `Network request for 'getWebhookInfo' failed`, and the same machine has broken outbound IPv6 connectivity, force direct Telegram requests to use IPv4:
-
-```env
-TELEGRAM_FORCE_IPV4=true
-```
-
-This affects direct Bot API calls and Telegram file downloads. It is not a replacement for `TELEGRAM_PROXY_URL` or `TELEGRAM_API_ROOT` when Telegram is blocked by the network.
-
-### Voice and Audio Transcription (Optional)
-
-If `STT_API_URL` and `STT_API_KEY` are set, the bot will:
-
-1. Accept `voice` and `audio` Telegram messages
-2. Transcribe them via `POST {STT_API_URL}/audio/transcriptions`
-3. Show recognized text in chat
-4. Send the recognized text to OpenCode as a normal prompt
-
-If `STT_NOTE_PROMPT` is set to a non-empty value other than `false` or `0`, the bot prepends `[Note: ...]` to the transcription before sending it to the LLM. The recognized text shown in Telegram stays unchanged.
-
-If TTS credentials are configured, you can choose spoken reply behavior in `/settings`: `off` disables audio replies, `all` sends audio for every assistant reply, and `auto` sends audio only after voice/audio prompts. The preference is stored in `settings.json` and persists across restarts.
-
-OpenAI-compatible TTS configuration example:
-
-```env
-TTS_PROVIDER=openai
-TTS_API_URL=https://api.openai.com/v1
-TTS_API_KEY=your-tts-api-key
-TTS_MODEL=gpt-4o-mini-tts
-TTS_VOICE=alloy
-```
-
-ElevenLabs TTS configuration example:
-
-```env
-TTS_PROVIDER=elevenlabs
-TTS_API_URL=https://api.elevenlabs.io/v1
-TTS_API_KEY=your-elevenlabs-api-key
-TTS_MODEL=eleven_flash_v2_5
-TTS_VOICE=21m00Tcm4TlvDq8ikWAM
-```
-
-Google Cloud TTS configuration example:
-
-```env
-TTS_PROVIDER=google
-TTS_VOICE=en-US-Studio-O
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
-```
-
-Supported provider examples (Whisper-compatible):
-
-- **OpenAI**
-  - `STT_API_URL=https://api.openai.com/v1`
-  - `STT_MODEL=whisper-1`
-- **Groq**
-  - `STT_API_URL=https://api.groq.com/openai/v1`
-  - `STT_MODEL=whisper-large-v3-turbo`
-- **Together**
-  - `STT_API_URL=https://api.together.xyz/v1`
-  - `STT_MODEL=openai/whisper-large-v3`
-
-If STT variables are not set, voice/audio transcription is disabled and the bot will ask you to configure STT.
-
-### Document Text Extraction (Optional)
-
-If `DOC_EXTRACTOR_URL` is set, the bot will extract text from PDF, DOCX, PPTX, and other document files using an external API when the current model does not natively support document input.
-
-The API contract is:
-
-- **Endpoint:** `POST {DOC_EXTRACTOR_URL}`
-- **Content-Type:** `multipart/form-data`
-- **Field:** `file` — the document binary
-- **Authorization:** `Bearer {DOC_EXTRACTOR_API_KEY}` (only sent when a key is configured)
-- **Response:** JSON `{ "text": "extracted content..." }`
-
-If the extractor is not configured and the model doesn't support documents, the bot replies with a notice and forwards only the caption text.
-
-### Model Configuration
-
-The model picker uses OpenCode local model state (`favorite` + `recent`):
-
-- Favorites are shown first, then recent
-- Models already in favorites are not duplicated in recent
-- Current model is marked with `✅`
-- Default model from `OPENCODE_MODEL_PROVIDER` + `OPENCODE_MODEL_ID` is always included in favorites
-
-To add a model to favorites, open OpenCode TUI (`opencode`), go to model selection, and press **Cmd+F/Ctrl+F** on the model.
-
-## Security
-
-The bot enforces a strict **user ID whitelist**. Only the Telegram user whose numeric ID matches `TELEGRAM_ALLOWED_USER_ID` can interact with the bot. Messages from any other user are silently ignored and logged as unauthorized access attempts.
-
-Since the bot runs locally on your machine and connects to your local OpenCode server, there is no external attack surface beyond the Telegram Bot API itself.
-
-## Development
-
-### Running from Source
+## Development Checks
 
 ```bash
-git clone https://github.com/grinev/opencode-telegram-bot.git
-cd opencode-telegram-bot
-npm install
-cp .env.example .env
-# Edit .env with your bot token, user ID, and model settings
+npm run build
+npm run typecheck
+npm run lint
+npm test
 ```
-
-Build and run:
-
-```bash
-npm run dev
-```
-
-### Available Scripts
-
-| Script                          | Description                          |
-| ------------------------------- | ------------------------------------ |
-| `npm run dev`                   | Build and start (development)        |
-| `npm run build`                 | Compile TypeScript                   |
-| `npm start`                     | Run compiled code                    |
-| `npm run release:notes:preview` | Preview auto-generated release notes |
-| `npm run lint`                  | ESLint check (zero warnings policy)  |
-| `npm run typecheck`             | Type-check `src` and `tests`         |
-| `npm run format`                | Format code with Prettier            |
-| `npm test`                      | Run tests (Vitest)                   |
-| `npm run test:coverage`         | Tests with coverage report           |
-
-> **Note:** No file watcher or auto-restart is used. The bot maintains persistent SSE and long-polling connections — automatic restarts would break them mid-task. After making changes, restart manually with `npm run dev`.
-
-## Troubleshooting
-
-**Bot doesn't respond to messages**
-
-- Make sure `TELEGRAM_ALLOWED_USER_ID` matches your actual Telegram user ID (check with [@userinfobot](https://t.me/userinfobot))
-- Verify the bot token is correct
-
-**"OpenCode server is not available"**
-
-- Ensure an OpenCode server is running at the configured `OPENCODE_API_URL` (default: `http://localhost:4096`)
-- For a local setup, you can start it with `opencode serve` or use `/opencode_start` in Telegram
-- For VPS/systemd setups with scheduled tasks, enable `OPENCODE_AUTO_RESTART_ENABLED=true` to let the bot restart a local OpenCode server when health-checks fail
-- If `OPENCODE_API_URL` points to a remote server, verify that the address is reachable from the bot machine and that the remote server is healthy
-
-**No models in model picker**
-
-- Add models to your OpenCode favorites: open OpenCode TUI, go to model selection, press **Ctrl+F** on desired models
-- Verify `OPENCODE_MODEL_PROVIDER` and `OPENCODE_MODEL_ID` point to an available model in your setup
-
-**Linux: permission denied errors**
-
-- Make sure the CLI binary has execute permission: `chmod +x $(which opencode-telegram)`
-- Check that the config directory is writable: `~/.config/opencode-telegram-bot/`
-
-## Contributing
-
-Please follow commit and release note conventions in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Community
-
-Have questions, want to share your experience using the bot, or have an idea for a feature? Join the [Telegram group](https://t.me/+Fj_IyKRi6-41MGUy) for announcements and discussions, or start a thread in [GitHub Discussions](https://github.com/grinev/opencode-telegram-bot/discussions).
-
-## Support
-
-This project is free and open source. Development and testing run on paid AI model subscriptions, and donations go directly toward those.
-
-If you find this bot useful, you can support it here: [Donate](https://donate.trybit.com/D9J1UVKT)
-
-Any amount helps — thank you!
 
 ## License
 
-[MIT](LICENSE) © Ruslan Grinev
+[MIT](LICENSE)

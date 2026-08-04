@@ -64,7 +64,10 @@ describe("app/stores/settings-store", () => {
   });
 
   it("loads compact output mode from settings.json", async () => {
-    await writeFile(path.join(tempHome, "settings.json"), JSON.stringify({ compactOutputMode: true }));
+    await writeFile(
+      path.join(tempHome, "settings.json"),
+      JSON.stringify({ compactOutputMode: true }),
+    );
 
     await loadSettings();
 
@@ -126,10 +129,12 @@ describe("app/stores/settings-store", () => {
     vi.resetModules();
     vi.stubEnv("INITIAL_SETTINGS_PRESET", '{"unknownKey":true,"compactOutputMode":true}');
 
-    await expect((async () => {
-      const store = await import("../../../src/app/stores/settings-store.js");
-      await store.loadSettings();
-    })()).rejects.toThrow(/unknown key "unknownKey"/);
+    await expect(
+      (async () => {
+        const store = await import("../../../src/app/stores/settings-store.js");
+        await store.loadSettings();
+      })(),
+    ).rejects.toThrow(/unknown key "unknownKey"/);
 
     vi.unstubAllEnvs();
     vi.resetModules();
@@ -139,17 +144,22 @@ describe("app/stores/settings-store", () => {
     vi.resetModules();
     vi.stubEnv("INITIAL_SETTINGS_PRESET", '{"compactOutputMode":"yes"}');
 
-    await expect((async () => {
-      const store = await import("../../../src/app/stores/settings-store.js");
-      await store.loadSettings();
-    })()).rejects.toThrow(/"compactOutputMode" must be a boolean/);
+    await expect(
+      (async () => {
+        const store = await import("../../../src/app/stores/settings-store.js");
+        await store.loadSettings();
+      })(),
+    ).rejects.toThrow(/"compactOutputMode" must be a boolean/);
 
     vi.unstubAllEnvs();
     vi.resetModules();
   });
 
   it("loads thinking content setting from settings.json", async () => {
-    await writeFile(path.join(tempHome, "settings.json"), JSON.stringify({ showThinkingContent: false }));
+    await writeFile(
+      path.join(tempHome, "settings.json"),
+      JSON.stringify({ showThinkingContent: false }),
+    );
 
     await loadSettings();
 
@@ -169,7 +179,10 @@ describe("app/stores/settings-store", () => {
   });
 
   it("loads response streaming mode from settings.json", async () => {
-    await writeFile(path.join(tempHome, "settings.json"), JSON.stringify({ responseStreamingMode: "draft" }));
+    await writeFile(
+      path.join(tempHome, "settings.json"),
+      JSON.stringify({ responseStreamingMode: "draft" }),
+    );
 
     await loadSettings();
 
@@ -279,7 +292,9 @@ describe("app/stores/settings-store", () => {
   describe("atomic writes and backup recovery", () => {
     const settingsPath = (): string => path.join(tempHome, "settings.json");
     const backupPath = (): string => path.join(tempHome, "settings.json.bak");
-    const tempPath = (): string => path.join(tempHome, "settings.json.tmp");
+    const tempPath = (): string => path.join(tempHome, `settings.json.tmp.${process.pid}`);
+    const backupTempPath = (): string =>
+      path.join(tempHome, `settings.json.bak.tmp.${process.pid}`);
 
     const exists = async (filePath: string): Promise<boolean> => {
       try {
@@ -295,6 +310,8 @@ describe("app/stores/settings-store", () => {
       id,
       projectId: "project-1",
       projectWorktree: "D:/work/project-1",
+      sessionId: "session-1",
+      sessionTitle: "Session 1",
       model: { providerID: "anthropic", modelID: "claude-opus-5", variant: null },
       scheduleText: "every day at 9",
       scheduleSummary: "Every day at 09:00",
@@ -318,6 +335,7 @@ describe("app/stores/settings-store", () => {
       expect(await exists(settingsPath())).toBe(true);
       expect(await exists(backupPath())).toBe(false);
       expect(await exists(tempPath())).toBe(false);
+      expect(await exists(backupTempPath())).toBe(false);
     });
 
     it("keeps the previous version in settings.json.bak on the next write", async () => {
@@ -333,6 +351,7 @@ describe("app/stores/settings-store", () => {
       expect(settings.compactOutputMode).toBe(false);
       expect(backup.compactOutputMode).toBe(true);
       expect(await exists(tempPath())).toBe(false);
+      expect(await exists(backupTempPath())).toBe(false);
     });
 
     it("recovers settings from the backup when settings.json is corrupted", async () => {
@@ -351,6 +370,7 @@ describe("app/stores/settings-store", () => {
 
       expect(getShowThinkingContent()).toBe(false);
     });
+
 
     it("keeps the valid backup on the first write after a recovery", async () => {
       await writeFile(settingsPath(), '{"compactOutputMode": tr');

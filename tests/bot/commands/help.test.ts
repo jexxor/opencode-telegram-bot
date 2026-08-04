@@ -22,4 +22,15 @@ describe("bot/commands/help-command", () => {
       expect(helpText).toContain(item.description);
     }
   });
+
+  it("uses homogeneous descriptions without emoji for mission commands", () => {
+    const commands = getLocalizedBotCommands();
+
+    expect(commands.find((item) => item.command === "mission")?.description).toBe(
+      "Create a mission",
+    );
+    expect(commands.find((item) => item.command === "missions")?.description).toBe(
+      "Manage missions",
+    );
+  });
 });

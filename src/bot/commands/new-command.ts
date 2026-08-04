@@ -11,8 +11,6 @@ import { getStoredAgent, resolveProjectAgent } from "../../app/services/agent-se
 import { getStoredModel } from "../../app/services/model-selection-service.js";
 import { formatVariantForButton } from "../../app/services/variant-selection-service.js";
 import { createMainKeyboard } from "../keyboards/main-reply-keyboard.js";
-import { isForegroundBusy } from "../../app/services/run-control-service.js";
-import { replyBusyBlocked } from "../messages/busy-blocked-renderer.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { attachToSession } from "../../app/services/attach-service.js";
@@ -24,11 +22,6 @@ export interface NewCommandDeps {
 
 export async function newCommand(ctx: CommandContext<Context>, deps: NewCommandDeps) {
   try {
-    if (isForegroundBusy()) {
-      await replyBusyBlocked(ctx);
-      return;
-    }
-
     const currentProject = getCurrentProject();
 
     if (!currentProject) {

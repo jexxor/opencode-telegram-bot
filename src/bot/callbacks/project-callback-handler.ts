@@ -1,13 +1,11 @@
 import type { Context } from "grammy";
 import { clearAllInteractionState } from "../../app/managers/interaction-manager.js";
 import { getProjects } from "../../app/services/project-service.js";
-import { isForegroundBusy } from "../../app/services/run-control-service.js";
 import { switchToProject } from "../../app/services/project-switch-service.js";
 import { t } from "../../i18n/index.js";
 import { logger } from "../../utils/logger.js";
 import { appendInlineMenuCancelButton, ensureActiveInlineMenu } from "../menus/inline-menu.js";
 import { buildProjectsMenuView, parseProjectPageCallback } from "../menus/project-selection-menu.js";
-import { replyBusyBlocked } from "../messages/busy-blocked-renderer.js";
 import { createProjectSwitchPresentation } from "../services/project-switch-presentation.js";
 
 interface ProjectSelectDeps {
@@ -28,11 +26,6 @@ export async function handleProjectSelect(
 
   if (page === null && !isProjectSelection) {
     return false;
-  }
-
-  if (isForegroundBusy()) {
-    await replyBusyBlocked(ctx);
-    return true;
   }
 
   if (page !== null) {

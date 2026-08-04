@@ -1,8 +1,6 @@
 import { CommandContext, Context } from "grammy";
 import { getCurrentProject } from "../../app/stores/settings-store.js";
 import { replyWithInlineMenu } from "../menus/inline-menu.js";
-import { isForegroundBusy } from "../../app/services/run-control-service.js";
-import { replyBusyBlocked } from "../messages/busy-blocked-renderer.js";
 import { logger } from "../../utils/logger.js";
 import { config } from "../../config.js";
 import { t } from "../../i18n/index.js";
@@ -10,11 +8,6 @@ import { buildSessionSelectionMenuView, loadSessionPage } from "../menus/session
 
 export async function sessionsCommand(ctx: CommandContext<Context>) {
   try {
-    if (isForegroundBusy()) {
-      await replyBusyBlocked(ctx);
-      return;
-    }
-
     const pageSize = config.bot.sessionsListLimit;
     const currentProject = getCurrentProject();
 

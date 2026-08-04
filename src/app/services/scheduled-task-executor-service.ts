@@ -2,14 +2,13 @@ import { config } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { opencodeClient } from "../../opencode/client.js";
 import { logger } from "../../utils/logger.js";
-import {
-  cleanupScheduledTaskSessionIgnores,
-  registerScheduledTaskSessionIgnore,
-} from "./scheduled-task-session-ignore-service.js";
 import type { ScheduledTask, ScheduledTaskExecutionResult } from "../types/scheduled-task.js";
+import {
+  markScheduledTaskSessionActive,
+  markScheduledTaskSessionInactive,
+} from "../managers/scheduled-task-active-session-manager.js";
 
 export const SCHEDULED_TASK_AGENT = "build";
-const SCHEDULED_TASK_SESSION_TITLE = "Scheduled task run";
 const EXECUTION_POLL_INTERVAL_MS = 2000;
 const MAX_IDLE_POLLS_WITHOUT_RESULT = 3;
 // Grace period for the server to start the session before any activity is seen.
@@ -58,7 +57,7 @@ type AssistantMessageSnapshot = {
     role: string;
     summary?: unknown;
     finish?: string;
-    time?: { completed?: number };
+    time?: { created?: number; completed?: number };
     error?: unknown;
   };
   parts: MessagePartSnapshot[];
@@ -172,10 +171,17 @@ function findLatestAssistantMessage(
     info: { role: string; summary?: unknown; finish?: string };
     parts: MessagePartSnapshot[];
   }>,
+  startedAtMs: number,
 ): AssistantMessageSnapshot | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.info.role === "assistant" && !message.info.summary) {
+    const createdAt = (message as AssistantMessageSnapshot | undefined)?.info.time?.created;
+    if (
+      message?.info.role === "assistant" &&
+      !message.info.summary &&
+      typeof createdAt === "number" &&
+      createdAt >= startedAtMs
+    ) {
       return message;
     }
   }
@@ -407,6 +413,7 @@ async function failIfInteractiveRequest(
 async function loadAssistantResult(
   sessionId: string,
   directory: string,
+  startedAtMs: number,
 ): Promise<ReturnType<typeof extractAssistantResult>> {
   const { data: messages, error: messagesError } = await opencodeClient.session.messages({
     sessionID: sessionId,
@@ -417,15 +424,15 @@ async function loadAssistantResult(
     throw messagesError || new Error("Failed to load scheduled task messages");
   }
 
-  return extractAssistantResult(findLatestAssistantMessage(messages));
+  return extractAssistantResult(findLatestAssistantMessage(messages, startedAtMs));
 }
 
 async function waitForScheduledTaskResult(
   taskId: string,
   sessionId: string,
   directory: string,
+  startedAtMs: number,
 ): Promise<string> {
-  const startedAtMs = Date.now();
   const executionTimeoutMs = getExecutionTimeoutMs();
   let idlePollsWithoutResult = 0;
   let startupPollsWithoutActivity = 0;
@@ -439,7 +446,7 @@ async function waitForScheduledTaskResult(
 
     await failIfInteractiveRequest(taskId, sessionId, directory);
 
-    const assistantResult = await loadAssistantResult(sessionId, directory);
+    const assistantResult = await loadAssistantResult(sessionId, directory, startedAtMs);
 
     if (assistantResult.errorMessage) {
       throw new Error(assistantResult.errorMessage);
@@ -483,7 +490,7 @@ async function waitForScheduledTaskResult(
       idlePollsWithoutResult = 0;
       startupPollsWithoutActivity = 0;
     } else {
-      const confirmedAssistantResult = await loadAssistantResult(sessionId, directory);
+      const confirmedAssistantResult = await loadAssistantResult(sessionId, directory, startedAtMs);
 
       if (confirmedAssistantResult.errorMessage) {
         throw new Error(confirmedAssistantResult.errorMessage);
@@ -527,27 +534,43 @@ async function waitForScheduledTaskResult(
   }
 }
 
-export async function executeScheduledTask(
+async function waitForBoundSessionIdle(
+  sessionId: string,
+  directory: string,
+  startedAtMs: number,
+): Promise<void> {
+  while (Date.now() - startedAtMs < getExecutionTimeoutMs()) {
+    const { data: statuses, error } = await opencodeClient.session.status({ directory });
+    if (error || !statuses) {
+      throw error || new Error("Failed to load bound session status");
+    }
+
+    const status = statuses[sessionId]?.type;
+    if (status !== "busy" && status !== "retry") {
+      return;
+    }
+
+    await sleep(EXECUTION_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(createExecutionTimeoutMessage());
+}
+
+async function executeScheduledTaskInBoundSession(
   task: ScheduledTask,
 ): Promise<ScheduledTaskExecutionResult> {
   const startedAt = new Date().toISOString();
-  let sessionId: string | null = null;
-  let deleteTemporarySession = true;
+  const startedAtMs = Date.parse(startedAt);
+  let promptStarted = false;
 
   try {
-    await cleanupScheduledTaskSessionIgnores();
-
-    const { data: session, error: createError } = await opencodeClient.session.create({
-      directory: task.projectWorktree,
-      title: SCHEDULED_TASK_SESSION_TITLE,
-    });
-
-    if (createError || !session) {
-      throw createError || new Error("Failed to create temporary scheduled task session");
+    if (!task.sessionId || !task.sessionTitle) {
+      throw new Error("Scheduled task is not bound to a session. Recreate the task.");
     }
 
-    sessionId = session.id;
-    await registerScheduledTaskSessionIgnore(session.id);
+    await waitForBoundSessionIdle(task.sessionId, task.projectWorktree, startedAtMs);
+    markScheduledTaskSessionActive(task.sessionId);
+    const responseStartedAtMs = Date.now();
 
     const promptOptions: {
       sessionID: string;
@@ -557,8 +580,8 @@ export async function executeScheduledTask(
       model?: { providerID: string; modelID: string };
       variant?: string;
     } = {
-      sessionID: session.id,
-      directory: session.directory,
+      sessionID: task.sessionId,
+      directory: task.projectWorktree,
       parts: [{ type: "text", text: task.prompt }],
       agent: SCHEDULED_TASK_AGENT,
     };
@@ -579,8 +602,14 @@ export async function executeScheduledTask(
     if (promptError) {
       throw promptError || new Error("Scheduled task prompt execution failed");
     }
+    promptStarted = true;
 
-    const resultText = await waitForScheduledTaskResult(task.id, session.id, session.directory);
+    const resultText = await waitForScheduledTaskResult(
+      task.id,
+      task.sessionId,
+      task.projectWorktree,
+      responseStartedAtMs,
+    );
 
     return {
       taskId: task.id,
@@ -592,11 +621,8 @@ export async function executeScheduledTask(
     };
   } catch (error) {
     const errorMessage = toErrorMessage(error);
-    if (error instanceof ScheduledTaskEmptyAssistantResponseError && sessionId) {
-      deleteTemporarySession = false;
-      logger.warn(
-        `[ScheduledTaskExecutor] Keeping temporary session for inspection: id=${task.id}, sessionId=${sessionId}`,
-      );
+    if (promptStarted && !(error instanceof ScheduledTaskInteractiveRequestError)) {
+      await abortScheduledTaskSession(task.sessionId, task.projectWorktree);
     }
 
     logger.warn(
@@ -612,15 +638,26 @@ export async function executeScheduledTask(
       errorMessage,
     };
   } finally {
-    if (sessionId && deleteTemporarySession) {
-      try {
-        await opencodeClient.session.delete({ sessionID: sessionId });
-      } catch (error) {
-        logger.warn(
-          `[ScheduledTaskExecutor] Failed to delete temporary session: sessionId=${sessionId}`,
-          error,
-        );
-      }
-    }
+    markScheduledTaskSessionInactive(task.sessionId);
   }
+}
+
+const sessionExecutionQueues = new Map<string, Promise<void>>();
+
+export function executeScheduledTask(task: ScheduledTask): Promise<ScheduledTaskExecutionResult> {
+  const previous = sessionExecutionQueues.get(task.sessionId) ?? Promise.resolve();
+  const result = previous
+    .catch(() => undefined)
+    .then(() => executeScheduledTaskInBoundSession(task));
+  const tail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  sessionExecutionQueues.set(task.sessionId, tail);
+  void tail.finally(() => {
+    if (sessionExecutionQueues.get(task.sessionId) === tail) {
+      sessionExecutionQueues.delete(task.sessionId);
+    }
+  });
+  return result;
 }

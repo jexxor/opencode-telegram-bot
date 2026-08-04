@@ -9,6 +9,7 @@ import { assistantRunState } from "../../app/managers/assistant-run-state-manage
 import { markAttachedSessionIdle } from "../../app/services/attach-service.js";
 import { clearPromptResponseMode } from "../handlers/prompt.js";
 import { markUserAbortRequested } from "../../app/managers/abort-suppression-manager.js";
+import { withTelegramRateLimitRetry } from "../../utils/telegram-rate-limit-retry.js";
 
 type SessionState = "idle" | "busy" | "not-found";
 
@@ -17,6 +18,26 @@ interface AbortCurrentOperationOptions {
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function editAbortMessage(
+  ctx: Context,
+  chatId: number,
+  messageId: number,
+  text: string,
+): Promise<void> {
+  try {
+    await withTelegramRateLimitRetry(() => ctx.api.editMessageText(chatId, messageId, text), {
+      onRetry: ({ retryAfterMs, error }) => {
+        logger.warn(
+          `[Abort] Telegram rate-limited status edit, retrying in ${retryAfterMs}ms`,
+          error,
+        );
+      },
+    });
+  } catch (error) {
+    logger.warn("[Abort] Failed to update abort status message", error);
+  }
+}
 
 function abortLocalStreaming(): void {
   clearAllInteractionState("abort_command");
@@ -119,7 +140,7 @@ export async function abortCurrentOperation(
         logger.warn("[Abort] Abort request failed:", abortError);
         await releaseAbortBusyState(currentSession.id, "abort_unconfirmed");
         if (notifyUser && chatId !== null && waitingMessageId !== null) {
-          await ctx.api.editMessageText(chatId, waitingMessageId, t("stop.warn_unconfirmed"));
+          await editAbortMessage(ctx, chatId, waitingMessageId, t("stop.warn_unconfirmed"));
         }
         return;
       }
@@ -127,7 +148,7 @@ export async function abortCurrentOperation(
       if (abortResult !== true) {
         await releaseAbortBusyState(currentSession.id, "abort_maybe_finished");
         if (notifyUser && chatId !== null && waitingMessageId !== null) {
-          await ctx.api.editMessageText(chatId, waitingMessageId, t("stop.warn_maybe_finished"));
+          await editAbortMessage(ctx, chatId, waitingMessageId, t("stop.warn_maybe_finished"));
         }
         return;
       }
@@ -141,11 +162,11 @@ export async function abortCurrentOperation(
       if (finalStatus === "idle" || finalStatus === "not-found") {
         await releaseAbortBusyState(currentSession.id, "abort_confirmed");
         if (notifyUser && chatId !== null && waitingMessageId !== null) {
-          await ctx.api.editMessageText(chatId, waitingMessageId, t("stop.success"));
+          await editAbortMessage(ctx, chatId, waitingMessageId, t("stop.success"));
         }
       } else {
         if (notifyUser && chatId !== null && waitingMessageId !== null) {
-          await ctx.api.editMessageText(chatId, waitingMessageId, t("stop.warn_still_busy"));
+          await editAbortMessage(ctx, chatId, waitingMessageId, t("stop.warn_still_busy"));
         }
       }
     } catch (error) {
@@ -154,12 +175,12 @@ export async function abortCurrentOperation(
 
       if (error instanceof Error && error.name === "AbortError") {
         if (notifyUser && chatId !== null && waitingMessageId !== null) {
-          await ctx.api.editMessageText(chatId, waitingMessageId, t("stop.warn_timeout"));
+          await editAbortMessage(ctx, chatId, waitingMessageId, t("stop.warn_timeout"));
         }
       } else {
         logger.error("[Abort] Error while aborting session:", error);
         if (notifyUser && chatId !== null && waitingMessageId !== null) {
-          await ctx.api.editMessageText(chatId, waitingMessageId, t("stop.warn_local_only"));
+          await editAbortMessage(ctx, chatId, waitingMessageId, t("stop.warn_local_only"));
         }
       }
     }

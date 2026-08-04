@@ -262,7 +262,7 @@ describe("interactionGuardMiddleware", () => {
     expect(ctx.reply).toHaveBeenCalledWith(t("task.blocked.command_not_allowed"));
   });
 
-  it("blocks disallowed command while busy with generic blocked message", async () => {
+  it("allows creating a new session while another session is busy", async () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
 
     const ctx = createTextContext("/new");
@@ -270,39 +270,11 @@ describe("interactionGuardMiddleware", () => {
 
     await interactionGuardMiddleware(ctx, next);
 
-    expect(next).not.toHaveBeenCalled();
-    expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_busy"));
-  });
-
-  it("blocks plain text while busy with generic blocked message", async () => {
-    foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
-
-    const ctx = createTextContext("hello");
-    const next: NextFunction = vi.fn().mockResolvedValue(undefined);
-
-    await interactionGuardMiddleware(ctx, next);
-
-    expect(next).not.toHaveBeenCalled();
-    expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_busy"));
-  });
-
-  it("passes through after on-demand reconciliation clears stale busy state", async () => {
-    foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
-    mocked.reconcileForegroundBusyStateMock.mockImplementationOnce(async () => {
-      foregroundSessionState.markIdle("session-1");
-    });
-
-    const ctx = createTextContext("hello");
-    const next: NextFunction = vi.fn().mockResolvedValue(undefined);
-
-    await interactionGuardMiddleware(ctx, next);
-
-    expect(mocked.reconcileForegroundBusyStateMock).toHaveBeenCalledTimes(1);
     expect(next).toHaveBeenCalledTimes(1);
     expect(ctx.reply).not.toHaveBeenCalled();
   });
 
-  it("keeps blocking after on-demand reconciliation leaves state busy", async () => {
+  it("allows plain text to reach the prompt queue while busy", async () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
 
     const ctx = createTextContext("hello");
@@ -310,12 +282,37 @@ describe("interactionGuardMiddleware", () => {
 
     await interactionGuardMiddleware(ctx, next);
 
-    expect(mocked.reconcileForegroundBusyStateMock).toHaveBeenCalledTimes(1);
-    expect(next).not.toHaveBeenCalled();
-    expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_busy"));
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(ctx.reply).not.toHaveBeenCalled();
   });
 
-  it("blocks callback while busy without active question or permission", async () => {
+  it("passes busy text through without reconciliation", async () => {
+    foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
+
+    const ctx = createTextContext("hello");
+    const next: NextFunction = vi.fn().mockResolvedValue(undefined);
+
+    await interactionGuardMiddleware(ctx, next);
+
+    expect(mocked.reconcileForegroundBusyStateMock).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(ctx.reply).not.toHaveBeenCalled();
+  });
+
+  it("keeps allowing text while the session remains busy", async () => {
+    foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
+
+    const ctx = createTextContext("hello");
+    const next: NextFunction = vi.fn().mockResolvedValue(undefined);
+
+    await interactionGuardMiddleware(ctx, next);
+
+    expect(mocked.reconcileForegroundBusyStateMock).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(ctx.reply).not.toHaveBeenCalled();
+  });
+
+  it("allows project callbacks while busy", async () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
 
     const ctx = createCallbackContext("project:123");
@@ -323,16 +320,25 @@ describe("interactionGuardMiddleware", () => {
 
     await interactionGuardMiddleware(ctx, next);
 
-    expect(next).not.toHaveBeenCalled();
-    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
-      text: t("bot.session_busy"),
-    });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(ctx.answerCallbackQuery).not.toHaveBeenCalled();
   });
 
-  it("allows abort, detach, status, and help while busy", async () => {
+  it("allows session control commands while busy", async () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
 
-    for (const command of ["/abort", "/detach", "/status", "/help"]) {
+    for (const command of [
+      "/abort",
+      "/detach",
+      "/status",
+      "/help",
+      "/sessions",
+      "/working",
+      "/projects",
+      "/loop",
+      "/loops",
+      "/new",
+    ]) {
       const ctx = createTextContext(command);
       const next: NextFunction = vi.fn().mockResolvedValue(undefined);
 

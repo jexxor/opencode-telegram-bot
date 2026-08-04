@@ -13,11 +13,19 @@ function cloneState(state: TaskCreationState): TaskCreationState {
 class TaskCreationManager {
   private state: TaskCreationState | null = null;
 
-  start(projectId: string, projectWorktree: string, model: ScheduledTaskModel): TaskCreationState {
+  start(
+    projectId: string,
+    projectWorktree: string,
+    sessionId: string,
+    sessionTitle: string,
+    model: ScheduledTaskModel,
+  ): TaskCreationState {
     this.state = {
       stage: "awaiting_schedule",
       projectId,
       projectWorktree,
+      sessionId,
+      sessionTitle,
       model: cloneScheduledTaskModel(model),
       scheduleText: null,
       parsedSchedule: null,
@@ -26,7 +34,9 @@ class TaskCreationManager {
       promptRequestMessageId: null,
     };
 
-    logger.info(`[TaskCreationManager] Started task creation flow for project=${projectWorktree}`);
+    logger.info(
+      `[TaskCreationManager] Started task creation flow: project=${projectWorktree}, session=${sessionId}`,
+    );
 
     return cloneState(this.state);
   }

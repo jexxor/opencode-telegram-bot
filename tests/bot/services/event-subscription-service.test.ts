@@ -10,11 +10,35 @@ import { resetSingletonState } from "../../helpers/reset-singleton-state.js";
 const mocked = vi.hoisted(() => ({
   subscribeToEvents: vi.fn(),
   stopEventListening: vi.fn(),
+  missionSessionIdle: vi.fn(),
+  missionSessionError: vi.fn(),
+  missionPermissionRequest: vi.fn(),
+  setMissionPermissionRecovery: vi.fn(),
+  missionPermissionRecoveryCallback: null as ((recovery: unknown) => Promise<void>) | null,
+  setMissionSessionFailure: vi.fn(),
+  missionSessionFailureCallback: null as ((failure: unknown) => Promise<void>) | null,
+  sessionMessages: vi.fn(),
 }));
 
 vi.mock("../../../src/opencode/events.js", () => ({
   subscribeToEvents: mocked.subscribeToEvents,
   stopEventListening: mocked.stopEventListening,
+}));
+
+vi.mock("../../../src/app/services/mission-runtime-service.js", () => ({
+  missionRuntime: {
+    handleSessionIdle: mocked.missionSessionIdle,
+    handleSessionError: mocked.missionSessionError,
+    handlePermissionRequest: mocked.missionPermissionRequest,
+    setOnPermissionRecovery: mocked.setMissionPermissionRecovery,
+    setOnSessionFailure: mocked.setMissionSessionFailure,
+  },
+}));
+
+vi.mock("../../../src/opencode/client.js", () => ({
+  opencodeClient: {
+    session: { messages: mocked.sessionMessages },
+  },
 }));
 
 type FakeBotApi = {
@@ -183,6 +207,18 @@ describe("bot/services/event-subscription-service", () => {
 
     mocked.subscribeToEvents.mockReset();
     mocked.stopEventListening.mockReset();
+    mocked.missionSessionIdle.mockReset();
+    mocked.missionSessionError.mockReset();
+    mocked.missionPermissionRequest.mockReset().mockResolvedValue({ handled: false });
+    mocked.missionPermissionRecoveryCallback = null;
+    mocked.setMissionPermissionRecovery.mockReset().mockImplementation((callback) => {
+      mocked.missionPermissionRecoveryCallback = callback;
+    });
+    mocked.missionSessionFailureCallback = null;
+    mocked.setMissionSessionFailure.mockReset().mockImplementation((callback) => {
+      mocked.missionSessionFailureCallback = callback;
+    });
+    mocked.sessionMessages.mockReset();
     mocked.subscribeToEvents.mockResolvedValue(undefined);
 
     const settingsStore = await import("../../../src/app/stores/settings-store.js");
@@ -195,6 +231,7 @@ describe("bot/services/event-subscription-service", () => {
     activeService = null;
 
     const settingsStore = await import("../../../src/app/stores/settings-store.js");
+    await settingsStore.flushSettings();
     settingsStore.__resetSettingsForTests();
     vi.unstubAllEnvs();
     await rm(tempHome, { recursive: true, force: true });
@@ -207,6 +244,8 @@ describe("bot/services/event-subscription-service", () => {
       showThinkingContent?: boolean;
       showAssistantRunFooter?: boolean;
       startAssistantRun?: boolean;
+      agentLoopId?: string;
+      agentLoopRunStartedAt?: string;
     } = {},
   ): Promise<{
     api: FakeBotApi;
@@ -247,6 +286,10 @@ describe("bot/services/event-subscription-service", () => {
         configuredAgent: "test-agent",
         configuredProviderID: "test-provider",
         configuredModelID: "test-model",
+        ...(options.agentLoopId ? { agentLoopId: options.agentLoopId } : {}),
+        ...(options.agentLoopRunStartedAt
+          ? { agentLoopRunStartedAt: options.agentLoopRunStartedAt }
+          : {}),
       });
     }
     service.setTelegramContext(bot, 42);
@@ -345,6 +388,83 @@ describe("bot/services/event-subscription-service", () => {
     expect(api.sendMessage.mock.calls[0][1]).toBe("Final answer");
   });
 
+  it("forwards a terminal marker to the originating agent loop", async () => {
+    const { agentLoopRuntime } = await import(
+      "../../../src/app/services/agent-loop-runtime-service.js"
+    );
+    const handleAssistantResponse = vi
+      .spyOn(agentLoopRuntime, "handleAssistantResponse")
+      .mockResolvedValue(true);
+    const { summaryAggregator } = await setupService(true, {
+      startAssistantRun: true,
+      agentLoopId: "loop-1",
+      agentLoopRunStartedAt: "run-1",
+    });
+
+    emitAssistantTextPart(summaryAggregator, "STOP_LOOP_REASON_TERMINAL");
+    emitAssistantCompleted(summaryAggregator);
+
+    await vi.waitFor(() => {
+      expect(handleAssistantResponse).toHaveBeenCalledWith(
+        "loop-1",
+        "STOP_LOOP_REASON_TERMINAL",
+        "run-1",
+      );
+    });
+    handleAssistantResponse.mockRestore();
+  });
+
+  it("forwards terminal markers from background loop sessions", async () => {
+    const { agentLoopRuntime } = await import(
+      "../../../src/app/services/agent-loop-runtime-service.js"
+    );
+    const handleAssistantResponse = vi
+      .spyOn(agentLoopRuntime, "handleAssistantResponse")
+      .mockResolvedValue(true);
+    await setupService(true);
+    const { assistantRunState } = await import(
+      "../../../src/app/managers/assistant-run-state-manager.js"
+    );
+    assistantRunState.startRun("background-session", {
+      startedAt: Date.now(),
+      agentLoopId: "loop-1",
+      agentLoopRunStartedAt: "run-1",
+    });
+    mocked.sessionMessages.mockResolvedValue({
+      data: [
+        {
+          info: { id: "message-1", role: "assistant" },
+          parts: [{ type: "text", text: "STOP_LOOP_REASON_TERMINAL" }],
+        },
+      ],
+      error: null,
+    });
+    const eventCallback = mocked.subscribeToEvents.mock.calls.at(-1)?.[1] as
+      | ((event: Event) => void)
+      | undefined;
+
+    eventCallback!({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "message-1",
+          sessionID: "background-session",
+          role: "assistant",
+          time: { completed: Date.now() },
+        },
+      },
+    } as unknown as Event);
+
+    await vi.waitFor(() =>
+      expect(handleAssistantResponse).toHaveBeenCalledWith(
+        "loop-1",
+        "STOP_LOOP_REASON_TERMINAL",
+        "run-1",
+      ),
+    );
+    handleAssistantResponse.mockRestore();
+  });
+
   it("notifies the final draft response when assistant run footer is disabled", async () => {
     const { api, summaryAggregator } = await setupService(true, {
       responseStreamingMode: "draft",
@@ -388,6 +508,145 @@ describe("bot/services/event-subscription-service", () => {
     expect(api.sendMessage.mock.calls[0][2]).toEqual({ disable_notification: true });
     expect(api.sendMessage.mock.calls[1][1]).toContain("test-provider/test-model");
     expect(api.sendMessageDraft).not.toHaveBeenCalled();
+  });
+
+  it("sends the run footer when session idle arrives before assistant completion", async () => {
+    const { api, summaryAggregator } = await setupService(true, {
+      responseStreamingMode: "edit",
+      showAssistantRunFooter: true,
+      startAssistantRun: true,
+    });
+
+    emitAssistantTextPart(summaryAggregator, "Final answer");
+    emitSessionIdle(summaryAggregator);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    emitAssistantCompleted(summaryAggregator);
+
+    await vi.waitFor(
+      () => {
+        expect(api.sendMessage).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 3000 },
+    );
+    expect(api.sendMessage.mock.calls[0][1]).toBe("Final answer");
+    expect(api.sendMessage.mock.calls[1][1]).toContain("test-provider/test-model");
+  });
+
+  it("does not stream scheduled-run events from a bound session", async () => {
+    const { api } = await setupService(true);
+    const { markScheduledTaskSessionActive } = await import(
+      "../../../src/app/managers/scheduled-task-active-session-manager.js"
+    );
+    markScheduledTaskSessionActive("session-1");
+    const eventCallback = mocked.subscribeToEvents.mock.calls.at(-1)?.[1] as
+      | ((event: Event) => void)
+      | undefined;
+    expect(eventCallback).toBeTypeOf("function");
+
+    eventCallback!({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "scheduled-text",
+          sessionID: "session-1",
+          messageID: "scheduled-message",
+          type: "text",
+          text: "Scheduled result",
+        },
+      },
+    } as unknown as Event);
+    eventCallback!({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "scheduled-message",
+          sessionID: "session-1",
+          role: "assistant",
+          time: { created: Date.now(), completed: Date.now() },
+        },
+      },
+    } as unknown as Event);
+    eventCallback!({
+      type: "session.idle",
+      properties: { sessionID: "session-1" },
+    } as unknown as Event);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("forwards raw child-session completion events to mission runtime", async () => {
+    await setupService(true);
+    const eventCallback = mocked.subscribeToEvents.mock.calls.at(-1)?.[1] as
+      | ((event: Event) => void)
+      | undefined;
+
+    eventCallback!({
+      type: "session.idle",
+      properties: { sessionID: "child-session" },
+    } as unknown as Event);
+    eventCallback!({
+      type: "session.error",
+      properties: {
+        sessionID: "failed-child",
+        error: { data: { message: "child failed" } },
+      },
+    } as unknown as Event);
+
+    await vi.waitFor(() => {
+      expect(mocked.missionSessionIdle).toHaveBeenCalledWith("child-session");
+      expect(mocked.missionSessionError).toHaveBeenCalledWith("failed-child", "child failed");
+    });
+  });
+
+  it("suppresses mission access prompts and notifies about the relaunched agent", async () => {
+    const { api } = await setupService(true);
+    const recovery = {
+      handled: true,
+      outcome: "relaunched",
+      sessionTitle: "Worker",
+      retry: 1,
+      retryLimit: 2,
+    };
+    mocked.missionPermissionRequest.mockImplementation(async () => {
+      await mocked.missionPermissionRecoveryCallback?.(recovery);
+      return recovery;
+    });
+    const eventCallback = mocked.subscribeToEvents.mock.calls.at(-1)?.[1] as
+      ((event: Event) => void) | undefined;
+
+    eventCallback!({
+      type: "permission.asked",
+      properties: {
+        id: "permission-1",
+        sessionID: "mission-session",
+        permission: "external_directory",
+        patterns: ["/parent/*"],
+        metadata: {},
+        always: [],
+      },
+    } as unknown as Event);
+
+    await vi.waitFor(() => {
+      expect(mocked.missionPermissionRequest).toHaveBeenCalled();
+      expect(api.sendMessage).toHaveBeenCalledWith(42, expect.stringContaining("🔴"));
+    });
+    const { permissionManager } = await import("../../../src/app/managers/permission-manager.js");
+    expect(permissionManager.isActive()).toBe(false);
+  });
+
+  it("sends a red notification when one mission session fails locally", async () => {
+    const { api } = await setupService(true);
+
+    await mocked.missionSessionFailureCallback?.({
+      sessionTitle: "Worker",
+      message: "model unavailable",
+    });
+
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      42,
+      expect.stringMatching(/🔴.*Worker.*model unavailable/),
+    );
   });
 
   it("clears permission prompts when OpenCode resolves pending requests", async () => {

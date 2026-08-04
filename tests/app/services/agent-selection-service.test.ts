@@ -190,4 +190,38 @@ describe("agent/manager", () => {
     expect(mocked.setCurrentAgentMock).toHaveBeenCalledWith("build");
     expect(mocked.sessionMessagesMock).not.toHaveBeenCalled();
   });
+
+  it("syncs the stored agent from session history when switching sessions", async () => {
+    mocked.setCurrentProject({
+      id: "project-4",
+      worktree: "/workspace/project-4",
+      name: "project-4",
+    });
+    mocked.setCurrentSession({
+      id: "session-1",
+      directory: "/workspace/project-4",
+      title: "Session 1",
+    });
+    mocked.setCurrentAgent("build");
+    mocked.sessionMessagesMock.mockResolvedValue({
+      data: [{ info: { agent: "plan" } }],
+      error: null,
+    });
+    mocked.appAgentsMock.mockResolvedValue(
+      createAgentResponse([
+        { name: "build", mode: "primary" },
+        { name: "plan", mode: "primary" },
+      ]),
+    );
+
+    const result = await fetchCurrentAgent({ syncFromSession: true });
+
+    expect(result).toBe("plan");
+    expect(mocked.sessionMessagesMock).toHaveBeenCalledWith({
+      sessionID: "session-1",
+      directory: "/workspace/project-4",
+      limit: 1,
+    });
+    expect(mocked.setCurrentAgentMock).toHaveBeenCalledWith("plan");
+  });
 });

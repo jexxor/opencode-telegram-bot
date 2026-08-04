@@ -13,6 +13,7 @@ import { summaryAggregator } from "../managers/summary-aggregation-manager.js";
 import { detachAttachedSession } from "./attach-service.js";
 import { stopEventListening } from "../../opencode/events.js";
 import { backgroundSessionTracker } from "../managers/background-session-manager.js";
+import { sessionStatusManager } from "../managers/session-status-manager.js";
 import { getStoredAgent, resolveProjectAgent } from "./agent-selection-service.js";
 import { getStoredModel } from "./model-selection-service.js";
 import { formatVariantForButton } from "./variant-selection-service.js";
@@ -59,6 +60,7 @@ export async function switchToProject(
   detachAttachedSession(reason);
   stopEventListening();
   backgroundSessionTracker.clear();
+  sessionStatusManager.clear();
   setCurrentProject(project);
   clearSession();
   summaryAggregator.clear();

@@ -2,6 +2,7 @@ import type { Bot, Context } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
 import { isOpencodeServerHealthy } from "../../opencode/ready-refresh.js";
 import { summaryAggregator } from "../managers/summary-aggregation-manager.js";
+import { sessionStatusManager } from "../managers/session-status-manager.js";
 import { questionManager } from "../managers/question-manager.js";
 import { permissionManager } from "../managers/permission-manager.js";
 import type { PermissionRequest } from "../types/permission.js";
@@ -10,6 +11,7 @@ import { getCurrentSession } from "./session-service.js";
 import { getCurrentProject } from "../stores/settings-store.js";
 import { attachManager } from "../managers/attach-manager.js";
 import { logger } from "../../utils/logger.js";
+import { missionRuntime } from "./mission-runtime-service.js";
 import { isExpectedOpencodeUnavailableError } from "../../utils/opencode-error.js";
 
 interface EnsureAttachPinnedSessionParams {
@@ -130,6 +132,12 @@ async function restorePendingPermissions(
   }
 
   for (const request of pendingPermissions) {
+    try {
+      const recovery = await missionRuntime.handlePermissionRequest(request, directory);
+      if (recovery.handled) continue;
+    } catch (error) {
+      logger.warn("[Attach] Failed mission permission recovery; showing request", error);
+    }
     await attachPresentation.showPermissionRequest(bot.api, chatId, request);
   }
 
@@ -138,6 +146,7 @@ async function restorePendingPermissions(
 
 export async function attachToSession(deps: AttachSessionDeps): Promise<AttachSessionResult> {
   const { bot, chatId, session, ensureEventSubscription, forceFullRestore = false } = deps;
+  sessionStatusManager.register(session);
   const alreadyAttached = attachManager.isAttachedSession(session.id, session.directory);
 
   await attachPresentation?.ensurePinnedSession({

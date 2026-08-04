@@ -41,6 +41,7 @@ const mocked = vi.hoisted(() => ({
   showPermissionRequestMock: vi.fn(),
   ensureEventSubscriptionMock: vi.fn(),
   stopEventListeningMock: vi.fn(),
+  missionPermissionRequestMock: vi.fn(),
 }));
 
 vi.mock("../../../src/app/stores/settings-store.js", () => ({
@@ -70,6 +71,12 @@ vi.mock("../../../src/opencode/client.js", () => ({
 
 vi.mock("../../../src/opencode/events.js", () => ({
   stopEventListening: mocked.stopEventListeningMock,
+}));
+
+vi.mock("../../../src/app/services/mission-runtime-service.js", () => ({
+  missionRuntime: {
+    handlePermissionRequest: mocked.missionPermissionRequestMock,
+  },
 }));
 
 vi.mock("../../../src/app/managers/summary-aggregation-manager.js", () => ({
@@ -176,6 +183,7 @@ describe("attach/service", () => {
     mocked.ensureEventSubscriptionMock.mockReset();
     mocked.ensureEventSubscriptionMock.mockResolvedValue(undefined);
     mocked.stopEventListeningMock.mockReset();
+    mocked.missionPermissionRequestMock.mockReset().mockResolvedValue({ handled: false });
   });
 
   it("follows an idle session and updates attach state", async () => {
@@ -251,6 +259,38 @@ describe("attach/service", () => {
 
     expect(result.restoredQuestion).toBe(true);
     expect(mocked.showCurrentQuestionMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not show a pending permission handled by mission recovery", async () => {
+    const permission = {
+      id: "permission-1",
+      sessionID: "session-1",
+      permission: "external_directory",
+      patterns: ["D:\\parent\\*"],
+      metadata: {},
+      always: [],
+    };
+    mocked.permissionListMock.mockResolvedValue({ data: [permission], error: null });
+    mocked.missionPermissionRequestMock.mockResolvedValue({
+      handled: true,
+      outcome: "relaunched",
+      sessionTitle: "Session One",
+      retry: 1,
+      retryLimit: 2,
+    });
+
+    await attachToSession({
+      bot: createBot(),
+      chatId: 777,
+      session: mocked.currentSession!,
+      ensureEventSubscription: mocked.ensureEventSubscriptionMock,
+    });
+
+    expect(mocked.missionPermissionRequestMock).toHaveBeenCalledWith(
+      permission,
+      "D:\\Projects\\Repo",
+    );
+    expect(mocked.showPermissionRequestMock).not.toHaveBeenCalled();
   });
 
   it("restores the saved current session on startup", async () => {

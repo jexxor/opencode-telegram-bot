@@ -5,6 +5,73 @@ import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { getCurrentProject } from "../stores/settings-store.js";
 
+const CODE_FENCE_LANGUAGES: Record<string, string> = {
+  asm: "asm",
+  c: "c",
+  cc: "cpp",
+  clj: "clojure",
+  cpp: "cpp",
+  cs: "csharp",
+  css: "css",
+  dart: "dart",
+  diff: "diff",
+  ex: "elixir",
+  exs: "elixir",
+  go: "go",
+  graphql: "graphql",
+  gql: "graphql",
+  groovy: "groovy",
+  h: "c",
+  hpp: "cpp",
+  hs: "haskell",
+  htm: "html",
+  html: "html",
+  java: "java",
+  js: "javascript",
+  json: "json",
+  jsx: "jsx",
+  kt: "kotlin",
+  kts: "kotlin",
+  lua: "lua",
+  md: "md",
+  markdown: "md",
+  php: "php",
+  pl: "perl",
+  proto: "protobuf",
+  py: "python",
+  rb: "ruby",
+  rs: "rust",
+  r: "r",
+  scss: "scss",
+  sh: "bash",
+  sql: "sql",
+  svelte: "svelte",
+  swift: "swift",
+  tex: "latex",
+  ts: "typescript",
+  tsx: "tsx",
+  vue: "vue",
+  xml: "xml",
+  yaml: "yaml",
+  yml: "yaml",
+  zsh: "shell",
+};
+
+function getCodeFenceLanguage(filePath: string): string {
+  const basename = path.basename(filePath).toLowerCase();
+  if (basename === "dockerfile") {
+    return "dockerfile";
+  }
+
+  const extension = path.extname(basename).slice(1);
+  return CODE_FENCE_LANGUAGES[extension] ?? "";
+}
+
+function getCodeFence(content: string): string {
+  const longestBacktickRun = Math.max(...(content.match(/`+/g)?.map((run) => run.length) ?? [0]));
+  return "`".repeat(Math.max(3, longestBacktickRun + 1));
+}
+
 function truncateWithEllipsis(text: string, maxLength: number): string {
   if (text.length <= maxLength) {
     return text;
@@ -372,11 +439,14 @@ export function prepareCodeFile(
     operation === "write"
       ? t("tool.file_header.write", { path: displayPath })
       : t("tool.file_header.edit", { path: displayPath });
-  const fullContent = header + processedContent;
+  const language = getCodeFenceLanguage(filePath);
+  const fencedContent = `${header}${processedContent}`;
+  const fence = getCodeFence(fencedContent);
+  const fullContent = `${fence}${language}\n${fencedContent}\n${fence}`;
 
   const buffer = Buffer.from(fullContent, "utf8");
   const basename = path.basename(filePath);
-  const filename = `${operation}_${basename}.txt`;
+  const filename = `${operation}_${basename}.md`;
 
   return { buffer, filename, caption: "" };
 }

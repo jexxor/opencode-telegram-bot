@@ -78,7 +78,7 @@ export async function resolveProjectAgent(preferredAgent?: string): Promise<stri
  * Falls back to "build" if nothing is stored.
  * @returns Current agent name
  */
-export async function fetchCurrentAgent(): Promise<string> {
+export async function fetchCurrentAgent(options?: { syncFromSession?: boolean }): Promise<string> {
   const storedAgent = getCurrentAgent();
   const session = getCurrentSession();
   const project = getCurrentProject();
@@ -106,6 +106,14 @@ export async function fetchCurrentAgent(): Promise<string> {
 
     const lastAgent = messages[0].info.agent;
     logger.debug(`[AgentManager] Current agent from session: ${lastAgent}`);
+
+    if (options?.syncFromSession && lastAgent) {
+      const sessionAgent = await resolveProjectAgent(lastAgent);
+      if (sessionAgent !== storedAgent) {
+        setCurrentAgent(sessionAgent);
+      }
+      return sessionAgent;
+    }
 
     // If user explicitly selected an agent in bot settings, prefer it.
     // Session messages may contain stale agent until next prompt is sent.

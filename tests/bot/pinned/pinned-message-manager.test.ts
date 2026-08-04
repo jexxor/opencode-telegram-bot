@@ -203,6 +203,16 @@ describe("pinned/manager", () => {
       expect(fakeApi.editMessageText).toHaveBeenCalledTimes(1);
     });
 
+    it("skips unchanged edits when refresh is not forced", async () => {
+      await pinnedMessageManager.onSessionChange("ses-1", "Test Session");
+
+      fakeApi.editMessageText.mockClear();
+
+      await pinnedMessageManager.refresh(false);
+
+      expect(fakeApi.editMessageText).not.toHaveBeenCalled();
+    });
+
     it("does not throw when no pinned message exists", async () => {
       // No pinned message was created → refresh should be a no-op
       await expect(pinnedMessageManager.refresh()).resolves.not.toThrow();

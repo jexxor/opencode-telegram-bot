@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { Bot, Context, InputFile } from "grammy";
+import type { Event } from "@opencode-ai/sdk/v2";
 import { config } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { summaryAggregator, type ToolInfo } from "../../app/managers/summary-aggregation-manager.js";
@@ -42,8 +43,15 @@ import {
 } from "../messages/telegram-text.js";
 import { formatAssistantRunFooter } from "../../app/formatters/assistant-run-footer-formatter.js";
 import { foregroundSessionState } from "../../app/managers/foreground-session-state-manager.js";
+import { sessionStatusManager } from "../../app/managers/session-status-manager.js";
 import { scheduledTaskRuntime } from "../../app/services/scheduled-task-runtime-service.js";
-import { assistantRunState } from "../../app/managers/assistant-run-state-manager.js";
+import { agentLoopRuntime } from "../../app/services/agent-loop-runtime-service.js";
+import { missionRuntime } from "../../app/services/mission-runtime-service.js";
+import { opencodeClient } from "../../opencode/client.js";
+import {
+  assistantRunState,
+  type AssistantRunInfo,
+} from "../../app/managers/assistant-run-state-manager.js";
 import { ResponseStreamer, type StreamingMessagePayload } from "../streaming/response-streamer.js";
 import { ToolCallStreamer, type ToolStreamKey } from "../streaming/tool-call-streamer.js";
 import { CompactProgressStreamer } from "../streaming/compact-progress-streamer.js";
@@ -77,6 +85,7 @@ import {
   interactionManager,
 } from "../../app/managers/interaction-manager.js";
 import { stopEventListening, subscribeToEvents } from "../../opencode/events.js";
+import { isScheduledTaskSessionActive } from "../../app/managers/scheduled-task-active-session-manager.js";
 
 const TELEGRAM_DOCUMENT_CAPTION_MAX_LENGTH = 1024;
 const RESPONSE_STREAM_THROTTLE_MS = config.bot.responseStreamThrottleMs;
@@ -113,6 +122,9 @@ class EventSubscriptionService implements BotEventSubscriptionService {
   private nextDraftId = 1;
   private readonly thinkingStreamingPayloads = new Map<string, StreamingMessagePayload>();
   private readonly sessionCompletionTasks = new Map<string, Promise<void>>();
+  private readonly pendingIdleRuns = new Map<string, number>();
+  private readonly missionHandledSessionErrors = new Set<string>();
+  private subscribedEventQueue: Promise<void> = Promise.resolve();
   private readonly compactProgressFinalizationTasks = new Map<string, Promise<void>>();
   private readonly assistantEditResponseStreamer: ResponseStreamer;
   private readonly assistantDraftResponseStreamer: ResponseStreamer;
@@ -123,6 +135,35 @@ class EventSubscriptionService implements BotEventSubscriptionService {
   private readonly compactProgressStreamer: CompactProgressStreamer;
 
   constructor() {
+    missionRuntime.setOnSessionFailure(async (failure) => {
+      if (!this.botInstance || !this.chatIdInstance) return;
+      const error =
+        failure.message.length > 3000
+          ? `${failure.message.slice(0, 2997)}...`
+          : failure.message;
+      await this.botInstance.api.sendMessage(
+        this.chatIdInstance,
+        t("mission.session_failed", {
+          agent: failure.sessionTitle,
+          error,
+        }),
+      );
+    });
+    missionRuntime.setOnPermissionRecovery(async (recovery) => {
+      if (!this.botInstance || !this.chatIdInstance) return;
+      const key =
+        recovery.outcome === "relaunched"
+          ? "mission.permission_relaunched"
+          : "mission.permission_agent_dropped";
+      await this.botInstance.api.sendMessage(
+        this.chatIdInstance,
+        t(key, {
+          agent: recovery.sessionTitle,
+          retry: recovery.retry,
+          limit: recovery.retryLimit,
+        }),
+      );
+    });
     this.toolMessageBatcher = new ToolMessageBatcher({
       sendText: async (sessionId, text) => {
         if (!this.botInstance || !this.chatIdInstance) {
@@ -185,6 +226,11 @@ class EventSubscriptionService implements BotEventSubscriptionService {
       hasActiveStream: (sessionId) => this.hasActiveAssistantResponseStream(sessionId),
     });
     setPromptResponseModeClearerForReconciliation(clearPromptResponseMode);
+    sessionStatusManager.setOnChange(() => {
+      if (pinnedMessageManager.isInitialized()) {
+        void pinnedMessageManager.refresh(false);
+      }
+    });
 
     this.compactProgressStreamer = new CompactProgressStreamer({
       throttleMs: RESPONSE_STREAM_THROTTLE_MS,
@@ -309,7 +355,10 @@ class EventSubscriptionService implements BotEventSubscriptionService {
     this.compactProgressFinalizationTasks.clear();
     this.thinkingStreamingPayloads.clear();
     this.sessionCompletionTasks.clear();
+    this.pendingIdleRuns.clear();
+    this.missionHandledSessionErrors.clear();
     assistantRunState.clearAll(reason);
+    sessionStatusManager.clear();
   }
 
   cleanup(reason: string): void {
@@ -389,6 +438,14 @@ class EventSubscriptionService implements BotEventSubscriptionService {
 
     summaryAggregator.setOnComplete((sessionId, messageId, messageText, completionInfo) => {
       void this.enqueueSessionCompletionTask(sessionId, async () => {
+        const loopRun = assistantRunState.getRun(sessionId);
+        if (loopRun?.agentLoopId) {
+          await agentLoopRuntime.handleAssistantResponse(
+            loopRun.agentLoopId,
+            messageText,
+            loopRun.agentLoopRunStartedAt,
+          );
+        }
         if (!this.botInstance || !this.chatIdInstance) {
           logger.error("Bot or chat ID not available for sending message");
           clearPromptResponseMode(sessionId);
@@ -397,6 +454,7 @@ class EventSubscriptionService implements BotEventSubscriptionService {
           this.toolCallStreamer.clearSession(sessionId, "bot_context_missing");
           this.compactProgressStreamer.clearSession(sessionId, "bot_context_missing");
           assistantRunState.clearRun(sessionId, "bot_context_missing");
+          this.pendingIdleRuns.delete(sessionId);
           foregroundSessionState.markIdle(sessionId);
           return;
         }
@@ -409,6 +467,7 @@ class EventSubscriptionService implements BotEventSubscriptionService {
           this.toolCallStreamer.clearSession(sessionId, "session_mismatch");
           this.compactProgressStreamer.clearSession(sessionId, "session_mismatch");
           assistantRunState.clearRun(sessionId, "session_mismatch");
+          this.pendingIdleRuns.delete(sessionId);
           foregroundSessionState.markIdle(sessionId);
           await scheduledTaskRuntime.flushDeferredDeliveries();
           return;
@@ -471,11 +530,25 @@ class EventSubscriptionService implements BotEventSubscriptionService {
             chatId,
             text: messageText,
           });
+
+          const pendingRunStartedAt = this.pendingIdleRuns.get(sessionId);
+          const activeRun = assistantRunState.getRun(sessionId);
+          if (activeRun && pendingRunStartedAt === activeRun.startedAt) {
+            this.pendingIdleRuns.delete(sessionId);
+            const completedRun = assistantRunState.finishRun(
+              sessionId,
+              "assistant_completed_after_session_idle",
+            );
+            if (completedRun) {
+              await this.sendAssistantRunFooter(completedRun);
+            }
+          }
         } catch (err) {
           clearPromptResponseMode(sessionId);
           this.clearThinkingStream(sessionId, messageId, "assistant_finalize_failed");
           this.compactProgressStreamer.clearSession(sessionId, "assistant_finalize_failed");
           assistantRunState.clearRun(sessionId, "assistant_finalize_failed");
+          this.pendingIdleRuns.delete(sessionId);
           logger.error("Failed to send message to Telegram:", err);
           logger.error("[Bot] CRITICAL: Stopping event processing due to error");
           summaryAggregator.clear();
@@ -872,9 +945,20 @@ class EventSubscriptionService implements BotEventSubscriptionService {
 
     summaryAggregator.setOnSessionIdle(async (sessionId) => {
       await markAttachedSessionIdle(sessionId);
-      await this.sessionCompletionTasks.get(sessionId)?.catch(() => undefined);
+      const completionTask = this.sessionCompletionTasks.get(sessionId);
+      await completionTask?.catch(() => undefined);
 
-      const completedRun = assistantRunState.finishRun(sessionId, "session_idle");
+      const activeRun = assistantRunState.getRun(sessionId);
+      let completedRun: AssistantRunInfo | null = null;
+      if (activeRun && !activeRun.hasCompletedResponse && !completionTask) {
+        this.pendingIdleRuns.set(sessionId, activeRun.startedAt);
+        logger.debug(
+          `[Bot] Deferring session idle footer until assistant completion: session=${sessionId}`,
+        );
+      } else {
+        this.pendingIdleRuns.delete(sessionId);
+        completedRun = assistantRunState.finishRun(sessionId, "session_idle");
+      }
       clearPromptResponseMode(sessionId);
 
       if (!this.botInstance || !this.chatIdInstance) {
@@ -895,26 +979,8 @@ class EventSubscriptionService implements BotEventSubscriptionService {
           this.toolCallStreamer.flushSession(sessionId, "session_idle"),
         ]);
 
-        if (getShowAssistantRunFooter() && completedRun?.hasCompletedResponse) {
-          const agent = completedRun.actualAgent || completedRun.configuredAgent;
-          const providerID = completedRun.actualProviderID || completedRun.configuredProviderID;
-          const modelID = completedRun.actualModelID || completedRun.configuredModelID;
-
-          if (agent && providerID && modelID) {
-            const keyboard = this.getCurrentReplyKeyboard();
-            await this.botInstance.api.sendMessage(
-              this.chatIdInstance,
-              formatAssistantRunFooter({
-                agent,
-                providerID,
-                modelID,
-                elapsedMs: Date.now() - completedRun.startedAt,
-              }),
-              {
-                ...(keyboard ? { reply_markup: keyboard } : {}),
-              },
-            );
-          }
+        if (completedRun) {
+          await this.sendAssistantRunFooter(completedRun);
         }
       } catch (err) {
         logger.error("[Bot] Failed to send session idle footer:", err);
@@ -925,6 +991,8 @@ class EventSubscriptionService implements BotEventSubscriptionService {
     });
 
     summaryAggregator.setOnSessionError(async (sessionId, message) => {
+      const handledByMission = this.missionHandledSessionErrors.delete(sessionId);
+      this.pendingIdleRuns.delete(sessionId);
       await markAttachedSessionIdle(sessionId);
       if (!this.botInstance || !this.chatIdInstance) {
         clearPromptResponseMode(sessionId);
@@ -954,6 +1022,12 @@ class EventSubscriptionService implements BotEventSubscriptionService {
         this.toolMessageBatcher.flushSession(sessionId, "session_error"),
         this.toolCallStreamer.flushSession(sessionId, "session_error"),
       ]);
+
+      if (handledByMission) {
+        foregroundSessionState.markIdle(sessionId);
+        await scheduledTaskRuntime.flushDeferredDeliveries();
+        return;
+      }
 
       const normalizedMessage = message.trim() || t("common.unknown_error");
       if (shouldSuppressUserAbortSessionError(sessionId, normalizedMessage)) {
@@ -1046,42 +1120,118 @@ class EventSubscriptionService implements BotEventSubscriptionService {
 
     logger.info(`[Bot] Subscribing to OpenCode events for project: ${directory}`);
     subscribeToEvents(directory, (event) => {
-      if ((event as EventStreamItem).type === "server.heartbeat") {
-        void reconcileBusyState(directory);
-      }
-
-      const attached = attachManager.getSnapshot();
-      const eventSessionId = this.getEventSessionId(event as EventStreamItem);
-      if (
-        attached &&
-        eventSessionId === attached.sessionId &&
-        this.shouldMarkAttachedBusyFromEvent(event as EventStreamItem)
-      ) {
-        void markAttachedSessionBusy(attached.sessionId);
-      }
-
-      if (event.type === "session.created" || event.type === "session.updated") {
-        const info = (
-          event.properties as { info?: { directory?: string; time?: { updated?: number } } }
-        ).info;
-
-        if (info?.directory) {
-          safeBackgroundTask({
-            taskName: `session.cache.${event.type}`,
-            task: () => ingestSessionInfoForCache(info),
-          });
-        }
-      }
-
-      if (config.bot.trackBackgroundSessions) {
-        backgroundSessionTracker.processEvent(event, getCurrentSession()?.id ?? null);
-      }
-
-      summaryAggregator.processEvent(event);
+      this.subscribedEventQueue = this.subscribedEventQueue
+        .then(() => this.processSubscribedEvent(directory, event))
+        .catch((error) => {
+          logger.error(`[Bot] Failed to process OpenCode event: type=${event.type}`, error);
+        });
     }).catch((err) => {
       logger.error("Failed to subscribe to events:", err);
     });
   };
+
+  private async processSubscribedEvent(directory: string, event: Event): Promise<void> {
+    if ((event as EventStreamItem).type === "server.heartbeat") {
+      void reconcileBusyState(directory);
+    }
+
+    if (event.type === "permission.asked") {
+      try {
+        const recovery = await missionRuntime.handlePermissionRequest(event.properties, directory);
+        if (recovery.handled) return;
+      } catch (error) {
+        logger.warn("[Mission] Failed to auto-reject agent access request", error);
+      }
+    }
+
+    const attached = attachManager.getSnapshot();
+    const eventSessionId = this.getEventSessionId(event as EventStreamItem);
+
+    if (
+      eventSessionId &&
+      eventSessionId !== getCurrentSession()?.id &&
+      event.type === "message.updated"
+    ) {
+      const info = event.properties.info as
+        { id?: string; role?: string; time?: { completed?: number } } | undefined;
+      const loopRun = assistantRunState.getRun(eventSessionId);
+      if (info?.id && info.role === "assistant" && info.time?.completed && loopRun?.agentLoopId) {
+        safeBackgroundTask({
+          taskName: `agentLoop.backgroundCompletion.${eventSessionId}`,
+          task: () =>
+            this.processBackgroundLoopCompletion(directory, eventSessionId, info.id!, loopRun),
+        });
+      }
+    }
+
+    if (eventSessionId && event.type === "session.idle") {
+      missionRuntime.handleSessionIdle(eventSessionId);
+    } else if (eventSessionId && event.type === "session.error") {
+      const error = (
+        event.properties as {
+          error?: { name?: string; message?: string; data?: { message?: string } };
+        }
+      ).error;
+      if (
+        missionRuntime.handleSessionError(
+          eventSessionId,
+          error?.data?.message || error?.message || error?.name || "Unknown session error",
+        )
+      ) {
+        this.missionHandledSessionErrors.add(eventSessionId);
+      }
+    }
+
+    if (
+      eventSessionId &&
+      eventSessionId !== getCurrentSession()?.id &&
+      (event.type === "session.idle" || event.type === "session.error")
+    ) {
+      foregroundSessionState.markIdle(eventSessionId);
+      assistantRunState.clearRun(eventSessionId, `session_${event.type}`);
+      this.pendingIdleRuns.delete(eventSessionId);
+      clearPromptResponseMode(eventSessionId);
+    }
+
+    if (
+      attached &&
+      eventSessionId === attached.sessionId &&
+      this.shouldMarkAttachedBusyFromEvent(event as EventStreamItem)
+    ) {
+      void markAttachedSessionBusy(attached.sessionId);
+    }
+
+    if (event.type === "session.created" || event.type === "session.updated") {
+      const info = (
+        event.properties as { info?: { directory?: string; time?: { updated?: number } } }
+      ).info;
+
+      if (info?.directory) {
+        safeBackgroundTask({
+          taskName: `session.cache.${event.type}`,
+          task: () => ingestSessionInfoForCache(info),
+        });
+      }
+    }
+
+    if (eventSessionId && isScheduledTaskSessionActive(eventSessionId)) {
+      sessionStatusManager.processEvent(event);
+      if (
+        attached?.sessionId === eventSessionId &&
+        (event.type === "session.idle" || event.type === "session.error")
+      ) {
+        void markAttachedSessionIdle(eventSessionId);
+      }
+      return;
+    }
+
+    if (config.bot.trackBackgroundSessions) {
+      backgroundSessionTracker.processEvent(event, getCurrentSession()?.id ?? null);
+    }
+
+    sessionStatusManager.processEvent(event);
+    summaryAggregator.processEvent(event);
+  }
 
   private getAssistantResponseStreamKey(sessionId: string, messageId: string): string {
     return `${sessionId}:${messageId}`;
@@ -1354,6 +1504,38 @@ class EventSubscriptionService implements BotEventSubscriptionService {
     return nextTask;
   }
 
+  private async sendAssistantRunFooter(completedRun: AssistantRunInfo): Promise<void> {
+    if (
+      !getShowAssistantRunFooter() ||
+      !completedRun.hasCompletedResponse ||
+      !this.botInstance ||
+      !this.chatIdInstance
+    ) {
+      return;
+    }
+
+    const agent = completedRun.actualAgent || completedRun.configuredAgent;
+    const providerID = completedRun.actualProviderID || completedRun.configuredProviderID;
+    const modelID = completedRun.actualModelID || completedRun.configuredModelID;
+    if (!agent || !providerID || !modelID) {
+      return;
+    }
+
+    const keyboard = this.getCurrentReplyKeyboard();
+    await this.botInstance.api.sendMessage(
+      this.chatIdInstance,
+      formatAssistantRunFooter({
+        agent,
+        providerID,
+        modelID,
+        elapsedMs: Date.now() - completedRun.startedAt,
+      }),
+      {
+        ...(keyboard ? { reply_markup: keyboard } : {}),
+      },
+    );
+  }
+
   private finalizeCompactProgress(sessionId: string): Promise<void> {
     const existingTask = this.compactProgressFinalizationTasks.get(sessionId);
     if (existingTask) {
@@ -1405,6 +1587,33 @@ class EventSubscriptionService implements BotEventSubscriptionService {
     return t("background.session_fallback", {
       id: this.formatShortSessionId(notification.sessionId),
     });
+  }
+
+  private async processBackgroundLoopCompletion(
+    directory: string,
+    sessionId: string,
+    messageId: string,
+    loopRun: AssistantRunInfo,
+  ): Promise<void> {
+    const { data: messages, error } = await opencodeClient.session.messages({
+      sessionID: sessionId,
+      directory,
+    });
+    if (error || !messages) {
+      throw error || new Error(`Failed to load background loop message ${messageId}`);
+    }
+    const message = messages.find((candidate) => candidate.info.id === messageId);
+    if (!message) return;
+    const messageText = message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+    if (!messageText) return;
+    await agentLoopRuntime.handleAssistantResponse(
+      loopRun.agentLoopId!,
+      messageText,
+      loopRun.agentLoopRunStartedAt,
+    );
   }
 
   private formatBackgroundSessionNotification(notification: BackgroundSessionNotification): string {

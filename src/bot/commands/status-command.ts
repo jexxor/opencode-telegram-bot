@@ -12,6 +12,10 @@ import { logger } from "../../utils/logger.js";
 import { isExpectedOpencodeUnavailableError } from "../../utils/opencode-error.js";
 import { t } from "../../i18n/index.js";
 import { sendBotText } from "../messages/telegram-text.js";
+import {
+  formatSessionActivityStatus,
+  sessionStatusManager,
+} from "../../app/managers/session-status-manager.js";
 
 export async function statusCommand(ctx: CommandContext<Context>) {
   try {
@@ -79,10 +83,24 @@ export async function statusCommand(ctx: CommandContext<Context>) {
 
     const currentSession = getCurrentSession();
     if (currentSession) {
+      sessionStatusManager.register(currentSession);
       message += `\n${t("status.session_selected", { title: currentSession.title })}\n`;
     } else {
       message += `\n${t("status.session_not_selected")}\n`;
       message += t("status.session_hint");
+    }
+
+    const sessionStatuses = sessionStatusManager.list(currentProject?.worktree);
+    if (sessionStatuses.length > 0) {
+      message += `\n${t("status.sessions.header")}\n`;
+      message += sessionStatuses
+        .map((session) =>
+          t("status.sessions.line", {
+            status: formatSessionActivityStatus(session.status),
+            title: session.title,
+          }),
+        )
+        .join("\n");
     }
 
     if (ctx.chat) {

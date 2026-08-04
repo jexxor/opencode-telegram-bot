@@ -1615,7 +1615,7 @@ describe("summary/aggregator", () => {
     expect(filePayload.sessionId).toBe("session-1");
     expect(filePayload.tool).toBe("apply_patch");
     expect(filePayload.hasFileAttachment).toBe(true);
-    expect(filePayload.fileData.filename).toBe("edit_one.ts.txt");
+    expect(filePayload.fileData.filename).toBe("edit_one.ts.md");
     expect(filePayload.fileData.buffer.toString("utf8")).toContain("Edit File/Path: src/one.ts");
   });
 
@@ -1675,7 +1675,7 @@ describe("summary/aggregator", () => {
     };
 
     expect(filePayload.hasFileAttachment).toBe(true);
-    expect(filePayload.fileData.filename).toBe("edit_README.md.txt");
+    expect(filePayload.fileData.filename).toBe("edit_README.md.md");
     expect(filePayload.fileData.buffer.toString("utf8")).toContain("Edit File/Path: README.md");
   });
 
@@ -2011,10 +2011,14 @@ describe("summary/aggregator", () => {
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    // Nothing is left to send, so the run completes silently - same as when the
-    // provider returns no text part at all.
+    // Nothing is left to send, but completion still releases run/queue state.
     expect(onPartial).not.toHaveBeenCalled();
-    expect(onComplete).not.toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledWith(
+      "session-1",
+      "message-empty-response",
+      "",
+      expect.objectContaining({ createdAt: expect.any(Number) }),
+    );
   });
 
   it("drops the empty-response placeholder while it is still streaming in", () => {

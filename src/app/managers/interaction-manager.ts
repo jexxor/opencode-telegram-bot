@@ -9,6 +9,7 @@ import { questionManager } from "./question-manager.js";
 import { renameManager } from "./rename-manager.js";
 import { taskCreationManager } from "./scheduled-task-creation-manager.js";
 import { logger } from "../../utils/logger.js";
+import { agentLoopCreationManager } from "./agent-loop-creation-manager.js";
 
 export const DEFAULT_ALLOWED_INTERACTION_COMMANDS = ["/help", "/status", "/abort", "/detach"] as const;
 
@@ -161,12 +162,14 @@ export function clearAllInteractionState(reason: string): void {
   const permissionActive = permissionManager.isActive();
   const renameActive = renameManager.isWaitingForName();
   const taskCreationActive = taskCreationManager.isActive();
+  const loopCreationActive = agentLoopCreationManager.getState() !== null;
   const interactionSnapshot = interactionManager.getSnapshot();
 
   questionManager.clear();
   permissionManager.clear();
   renameManager.clear();
   taskCreationManager.clear();
+  agentLoopCreationManager.clear();
   interactionManager.clear(reason);
 
   const hasAnyActiveState =
@@ -174,6 +177,7 @@ export function clearAllInteractionState(reason: string): void {
     permissionActive ||
     renameActive ||
     taskCreationActive ||
+    loopCreationActive ||
     interactionSnapshot !== null;
 
   const message =

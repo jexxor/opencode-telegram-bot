@@ -124,6 +124,11 @@ export async function getProjects(): Promise<ProjectInfo[]> {
   return projects.map(({ id, worktree, name }) => ({ id, worktree, name }));
 }
 
+export async function getProjectsIncludingWorktrees(): Promise<ProjectInfo[]> {
+  const projects = await getResolvedProjects({ includeLinkedWorktrees: true });
+  return projects.map(({ id, worktree, name }) => ({ id, worktree, name }));
+}
+
 export async function getProjectById(id: string): Promise<ProjectInfo> {
   const projects = await getProjects();
   const project = projects.find((p) => p.id === id);

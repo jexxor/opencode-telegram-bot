@@ -18,10 +18,15 @@ import { isExpectedOpencodeUnavailableError } from "../../utils/opencode-error.j
 import type { FileChange, PinnedMessageState, TokensInfo } from "./pinned-message-types.js";
 import { t } from "../../i18n/index.js";
 import {
+  formatSessionActivityStatus,
+  sessionStatusManager,
+} from "../../app/managers/session-status-manager.js";
+import {
   formatContextLine,
   formatCostLine,
   formatModelDisplayName,
 } from "./pinned-message-format.js";
+import { withTelegramRateLimitRetry } from "../../utils/telegram-rate-limit-retry.js";
 
 class PinnedMessageManager {
   private api: Api | null = null;
@@ -287,9 +292,9 @@ class PinnedMessageManager {
    * Refresh the pinned message with current in-memory state.
    * Used at thinking time to push accumulated silent updates to Telegram.
    */
-  async refresh(): Promise<void> {
+  async refresh(forceUpdate: boolean = true): Promise<void> {
     await this.refreshProjectMetadata();
-    await this.updatePinnedMessage(true);
+    await this.updatePinnedMessage(forceUpdate);
   }
 
   /**
@@ -721,6 +726,20 @@ class PinnedMessageManager {
 
     lines.push(formatContextLine(this.state.tokensUsed, this.state.tokensLimit));
 
+    const sessionStatuses = sessionStatusManager.list(getCurrentProject()?.worktree);
+    if (sessionStatuses.length > 0) {
+      lines.push("");
+      lines.push(t("status.sessions.header"));
+      for (const session of sessionStatuses) {
+        lines.push(
+          t("status.sessions.line", {
+            status: formatSessionActivityStatus(session.status),
+            title: session.title,
+          }),
+        );
+      }
+    }
+
     if (this.state.cost !== undefined && this.state.cost !== null) {
       lines.push(formatCostLine(this.state.cost));
     }
@@ -749,6 +768,7 @@ class PinnedMessageManager {
 
     return lines.join("\n");
   }
+
   /**
    * Create and pin a new status message
    */
@@ -826,7 +846,17 @@ class PinnedMessageManager {
       }
 
       try {
-        await this.api.editMessageText(this.chatId, this.state.messageId, text);
+        await withTelegramRateLimitRetry(
+          () => this.api!.editMessageText(this.chatId!, this.state.messageId!, text),
+          {
+            onRetry: ({ retryAfterMs, error }) => {
+              logger.warn(
+                `[PinnedManager] Telegram rate-limited edit, retrying in ${retryAfterMs}ms`,
+                error,
+              );
+            },
+          },
+        );
         this.state.lastUpdated = Date.now();
         this.lastRenderedMessageText = text;
 

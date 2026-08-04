@@ -11,6 +11,11 @@ const mocked = vi.hoisted(() => ({
     id: "project-1",
     worktree: "D:\\Projects\\Repo",
   } as { id: string; worktree: string } | null,
+  currentSession: {
+    id: "session-1",
+    title: "Daily work",
+    directory: "D:\\Projects\\Repo",
+  } as { id: string; title: string; directory: string } | null,
   storedModel: {
     providerID: "openai",
     modelID: "gpt-5",
@@ -65,6 +70,10 @@ vi.mock("../../../src/config.js", () => ({
 
 vi.mock("../../../src/app/stores/settings-store.js", () => ({
   getCurrentProject: vi.fn(() => mocked.currentProject),
+}));
+
+vi.mock("../../../src/app/services/session-service.js", () => ({
+  getCurrentSession: vi.fn(() => mocked.currentSession),
 }));
 
 vi.mock("../../../src/app/services/model-selection-service.js", () => ({
@@ -134,6 +143,11 @@ describe("bot/commands/task", () => {
       id: "project-1",
       worktree: "D:\\Projects\\Repo",
     };
+    mocked.currentSession = {
+      id: "session-1",
+      title: "Daily work",
+      directory: "D:\\Projects\\Repo",
+    };
     mocked.storedModel = {
       providerID: "openai",
       modelID: "gpt-5",
@@ -189,6 +203,16 @@ describe("bot/commands/task", () => {
     expect(interactionManager.getSnapshot()).toBeNull();
   });
 
+  it("does not start flow without an active session", async () => {
+    mocked.currentSession = null;
+    const ctx = createCommandContext();
+
+    await taskCommand(ctx as never);
+
+    expect(ctx.reply).toHaveBeenCalledWith(t("context.no_active_session"));
+    expect(taskCreationManager.isActive()).toBe(false);
+  });
+
   it("parses schedule and switches flow to prompt input", async () => {
     await taskCommand(createCommandContext() as never);
 
@@ -237,6 +261,8 @@ describe("bot/commands/task", () => {
       expect.objectContaining({
         projectId: "project-1",
         projectWorktree: "D:\\Projects\\Repo",
+        sessionId: "session-1",
+        sessionTitle: "Daily work",
         model: {
           providerID: "openai",
           modelID: "gpt-5",
@@ -256,6 +282,7 @@ describe("bot/commands/task", () => {
     const successCall = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
     expect(successCall[0]).toContain("Send me a daily summary");
     expect(successCall[0]).toContain("D:\\Projects\\Repo");
+    expect(successCall[0]).toContain("Daily work");
     expect(successCall[0]).toContain("openai/gpt-5 (default)");
     expect(successCall[0]).toContain("Every day at 17:00");
     expect(successCall[0]).toContain("Cron: 0 17 * * *");

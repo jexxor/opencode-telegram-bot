@@ -31,6 +31,7 @@ run/
 settings.json
 settings.json.bak
 settings.json.tmp
+missions.sqlite*
 .tmp/
 
 # Packaging artifacts

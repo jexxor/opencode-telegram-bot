@@ -1,7 +1,13 @@
 import type { ModelInfo } from "./model.js";
 import type { ProjectInfo } from "./project.js";
-import type { SessionDirectoryCacheInfo, SessionInfo } from "./session.js";
+import type {
+  QueuedSessionPrompt,
+  SessionDirectoryCacheInfo,
+  SessionInfo,
+} from "./session.js";
 import type { ScheduledTask } from "./scheduled-task.js";
+import type { AgentLoop } from "./loop.js";
+import type { Mission } from "./mission.js";
 
 export type ResponseStreamingMode = "edit" | "draft";
 
@@ -25,4 +31,8 @@ export interface Settings {
   sessionDirectoryCache?: SessionDirectoryCacheInfo;
   scheduledTasks?: ScheduledTask[];
   scheduledTaskSessionIgnores?: ScheduledTaskSessionIgnoreInfo[];
+  queuedSessionPrompts?: QueuedSessionPrompt[];
+  agentLoops?: AgentLoop[];
+  /** Legacy migration source. New mission state lives in missions.sqlite. */
+  missions?: Mission[];
 }

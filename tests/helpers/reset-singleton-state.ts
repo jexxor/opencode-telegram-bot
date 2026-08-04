@@ -52,11 +52,14 @@ export async function resetSingletonState(): Promise<void> {
     { renameManager },
     { interactionManager },
     { summaryAggregator },
+    { sessionStatusManager },
     { keyboardManager },
     { pinnedMessageManager },
     { stopEventListening },
     { __resetSessionDirectoryCacheForTests },
     { __resetMessageMergerForTests },
+    { __resetScheduledTaskActiveSessionsForTests },
+    { agentLoopCreationManager },
     loggerModule,
   ] = await Promise.all([
     import("../../src/app/managers/question-manager.js"),
@@ -64,11 +67,14 @@ export async function resetSingletonState(): Promise<void> {
     import("../../src/app/managers/rename-manager.js"),
     import("../../src/app/managers/interaction-manager.js"),
     import("../../src/app/managers/summary-aggregation-manager.js"),
+    import("../../src/app/managers/session-status-manager.js"),
     import("../../src/bot/keyboards/keyboard-manager.js"),
     import("../../src/bot/pinned/pinned-message-manager.js"),
     import("../../src/opencode/events.js"),
     import("../../src/app/services/session-cache-service.js"),
     import("../../src/bot/handlers/message-merger.js"),
+    import("../../src/app/managers/scheduled-task-active-session-manager.js"),
+    import("../../src/app/managers/agent-loop-creation-manager.js"),
     import("../../src/utils/logger.js"),
   ]);
 
@@ -78,7 +84,10 @@ export async function resetSingletonState(): Promise<void> {
   renameManager.clear();
   interactionManager.clear("test_reset");
   summaryAggregator.clear();
+  sessionStatusManager.__resetForTests();
   __resetMessageMergerForTests();
+  __resetScheduledTaskActiveSessionsForTests();
+  agentLoopCreationManager.__resetForTests();
 
   const aggregator = summaryAggregator as unknown as SummaryAggregatorPrivateState;
   aggregator.onCompleteCallback = null;

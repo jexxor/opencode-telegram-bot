@@ -6,20 +6,49 @@ import type {
   GuardDecision,
   IncomingInputType,
   InteractionState,
-  InteractionKind,
 } from "../../app/types/interaction.js";
 import { foregroundSessionState } from "../../app/managers/foreground-session-state-manager.js";
 import { attachManager } from "../../app/managers/attach-manager.js";
+import { getCurrentSession } from "../../app/services/session-service.js";
 
-const BUSY_ALLOWED_COMMANDS = ["/abort", "/detach", "/status", "/help"] as const;
+const BUSY_ALLOWED_COMMANDS = [
+  "/abort",
+  "/detach",
+  "/status",
+  "/help",
+  "/sessions",
+  "/working",
+  "/projects",
+  "/loop",
+  "/loops",
+  "/new",
+] as const;
 const BUSY_ALLOWED_COMMAND_SET = new Set<string>(BUSY_ALLOWED_COMMANDS);
 
 function isBusyAllowedCommand(command?: string): boolean {
   return Boolean(command && BUSY_ALLOWED_COMMAND_SET.has(command));
 }
 
-function allowsBusyInteraction(kind: InteractionKind | undefined): boolean {
-  return kind === "question" || kind === "permission";
+function allowsBusyInteraction(state: InteractionState | null): boolean {
+  return (
+    state?.kind === "question" ||
+    state?.kind === "permission" ||
+    (state?.kind === "custom" &&
+      (state.metadata.flow === "loop-create" || state.metadata.flow === "loops"))
+  );
+}
+
+function allowsBusySessionSelection(ctx: Context): boolean {
+  const callbackData = ctx.callbackQuery?.data;
+  return (
+    typeof callbackData === "string" &&
+    (callbackData.startsWith("session:") ||
+      callbackData.startsWith("background-session:") ||
+      callbackData.startsWith("project:") ||
+      callbackData.startsWith("projects:page:") ||
+      callbackData.startsWith("loop:") ||
+      callbackData.startsWith("loops:"))
+  );
 }
 
 function normalizeIncomingCommand(text: string): string | null {
@@ -142,7 +171,14 @@ function isAllowedTaskCallback(ctx: Context, state: InteractionState): boolean {
 export function resolveInteractionGuardDecision(ctx: Context): GuardDecision {
   const state = interactionManager.getSnapshot();
   const { inputType, command } = classifyIncomingInput(ctx);
-  const isBusy = foregroundSessionState.isBusy() || attachManager.isBusy();
+  const currentSession = getCurrentSession();
+  const isBusy =
+    attachManager.isBusy() ||
+    (currentSession === null
+      ? foregroundSessionState.isBusy()
+      : foregroundSessionState
+          .getBusySessions()
+          .some((session) => session.sessionId === currentSession.id));
 
   if (state && interactionManager.isExpired()) {
     interactionManager.clear("expired");
@@ -150,6 +186,10 @@ export function resolveInteractionGuardDecision(ctx: Context): GuardDecision {
   }
 
   if (isBusy) {
+    if (inputType === "callback" && allowsBusySessionSelection(ctx)) {
+      return createAllowDecision(inputType, state, command, true);
+    }
+
     if (inputType === "command") {
       if (isBusyAllowedCommand(command)) {
         return createAllowDecision(inputType, state, command, true);
@@ -158,7 +198,11 @@ export function resolveInteractionGuardDecision(ctx: Context): GuardDecision {
       return createBusyBlockDecision(inputType, state, "command_not_allowed", command);
     }
 
-    if (state && allowsBusyInteraction(state.kind)) {
+    if (inputType === "text" && !state) {
+      return createAllowDecision(inputType, null, command, true);
+    }
+
+    if (state && allowsBusyInteraction(state)) {
       if (state.expectedInput === "mixed") {
         if (inputType === "callback" || inputType === "text") {
           return createAllowDecision(inputType, state, command, true);

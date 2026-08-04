@@ -16,17 +16,6 @@ interface ProjectsPaginationRange {
   endIndex: number;
 }
 
-function formatProjectButtonLabel(label: string, isActive: boolean): string {
-  const prefix = isActive ? "✅ " : "";
-  const availableLength = MAX_INLINE_BUTTON_LABEL_LENGTH - prefix.length;
-
-  if (label.length <= availableLength) {
-    return `${prefix}${label}`;
-  }
-
-  return `${prefix}${label.slice(0, Math.max(0, availableLength - 3))}...`;
-}
-
 export function getProjectFolderName(worktree: string): string {
   const normalized = worktree.replace(/[\\/]+$/g, "");
 
@@ -41,6 +30,30 @@ export function getProjectFolderName(worktree: string): string {
 export function buildProjectButtonLabel(index: number, worktree: string): string {
   const folderName = getProjectFolderName(worktree);
   return `${index + 1}. ${folderName} [${worktree}]`;
+}
+
+export function buildProjectPathButtonLabel(
+  worktree: string,
+  options: { prefix?: string; maxLength?: number } = {},
+): string {
+  const maxLength = options.maxLength ?? MAX_INLINE_BUTTON_LABEL_LENGTH;
+  const folderName = getProjectFolderName(worktree);
+  const prefix = `${options.prefix ?? ""}📁 ${folderName}`;
+  const context = worktree.replace(/[\\/]+$/g, "");
+  const separator = " · ";
+  const availableContextLength = Math.max(8, maxLength - prefix.length - separator.length);
+  const availablePrefixLength = maxLength - availableContextLength - separator.length;
+  const displayPrefix =
+    prefix.length <= availablePrefixLength
+      ? prefix
+      : `${prefix.slice(0, Math.max(0, availablePrefixLength - 3))}...`;
+  const contextPrefixLength = Math.max(4, Math.floor((availableContextLength - 1) / 3));
+  const contextSuffixLength = availableContextLength - contextPrefixLength - 1;
+  const displayContext =
+    context.length <= availableContextLength
+      ? context
+      : `${context.slice(0, contextPrefixLength)}…${context.slice(-contextSuffixLength)}`;
+  return `${displayPrefix}${separator}${displayContext}`;
 }
 
 export function parseProjectPageCallback(data: string): number | null {
@@ -140,9 +153,9 @@ async function buildProjectsKeyboard(
         project.worktree === currentProject.worktree ||
         (activeProjectWorktree !== null &&
           worktreeKey(project.worktree) === worktreeKey(activeProjectWorktree)));
-    const label = buildProjectButtonLabel(startIndex + index, project.worktree);
-    const labelWithCheck = formatProjectButtonLabel(label, Boolean(isActive));
-    keyboard.text(labelWithCheck, `project:${project.id}`).row();
+    const prefix = `${isActive ? "✅ " : ""}${startIndex + index + 1}. `;
+    const label = buildProjectPathButtonLabel(project.worktree, { prefix });
+    keyboard.text(label, `project:${project.id}`).row();
   });
 
   if (totalPages > 1) {

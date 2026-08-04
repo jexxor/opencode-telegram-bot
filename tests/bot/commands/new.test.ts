@@ -109,14 +109,18 @@ describe("bot/commands/new", () => {
     mocked.getCurrentProjectMock.mockReturnValue({ id: "project-1", worktree: "/repo" });
   });
 
-  it("blocks new session creation while foreground session is busy", async () => {
+  it("creates a new session while another foreground session is busy", async () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
+    mocked.sessionCreateMock.mockResolvedValueOnce({
+      data: { id: "session-2", title: "Session Two" },
+      error: null,
+    });
 
     const ctx = createContext();
     await newCommand(ctx as never, createDeps());
 
-    expect(mocked.sessionCreateMock).not.toHaveBeenCalled();
-    expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_busy"));
+    expect(mocked.sessionCreateMock).toHaveBeenCalledWith({ directory: "/repo" });
+    expect(mocked.attachToSessionMock).toHaveBeenCalledOnce();
   });
 
   it("creates and immediately follows the new session", async () => {

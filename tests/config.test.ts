@@ -151,6 +151,14 @@ describe("config boolean env parsing", () => {
     expect(config.bot.taskLimit).toBe(10);
   });
 
+  it("uses default mission concurrency limit when MISSION_CONCURRENCY_LIMIT is missing", async () => {
+    vi.stubEnv("MISSION_CONCURRENCY_LIMIT", "");
+
+    const config = await loadConfig();
+
+    expect(config.bot.missionConcurrencyLimit).toBe(8);
+  });
+
   it("uses default scheduled task execution timeout when SCHEDULED_TASK_EXECUTION_TIMEOUT_MINUTES is missing", async () => {
     vi.stubEnv("SCHEDULED_TASK_EXECUTION_TIMEOUT_MINUTES", "");
 
@@ -213,6 +221,14 @@ describe("config boolean env parsing", () => {
     const config = await loadConfig();
 
     expect(config.bot.taskLimit).toBe(25);
+  });
+
+  it("parses MISSION_CONCURRENCY_LIMIT as a positive integer", async () => {
+    vi.stubEnv("MISSION_CONCURRENCY_LIMIT", "12");
+
+    const config = await loadConfig();
+
+    expect(config.bot.missionConcurrencyLimit).toBe(12);
   });
 
   it("parses SCHEDULED_TASK_EXECUTION_TIMEOUT_MINUTES as a positive integer", async () => {

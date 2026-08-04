@@ -12,8 +12,8 @@ const mocked = vi.hoisted(() => ({
   questionRejectMock: vi.fn(),
   permissionListMock: vi.fn(),
   permissionReplyMock: vi.fn(),
-  cleanupIgnoresMock: vi.fn(),
-  registerIgnoreMock: vi.fn(),
+  markScheduledSessionActiveMock: vi.fn(),
+  markScheduledSessionInactiveMock: vi.fn(),
   loggerWarnMock: vi.fn(),
 }));
 
@@ -55,17 +55,22 @@ vi.mock("../../../src/utils/logger.js", () => ({
   },
 }));
 
-vi.mock("../../../src/app/services/scheduled-task-session-ignore-service.js", () => ({
-  cleanupScheduledTaskSessionIgnores: mocked.cleanupIgnoresMock,
-  registerScheduledTaskSessionIgnore: mocked.registerIgnoreMock,
+vi.mock("../../../src/app/managers/scheduled-task-active-session-manager.js", () => ({
+  markScheduledTaskSessionActive: mocked.markScheduledSessionActiveMock,
+  markScheduledTaskSessionInactive: mocked.markScheduledSessionInactiveMock,
+  __resetScheduledTaskActiveSessionsForTests: vi.fn(),
 }));
 
-function createTask(partial: Partial<ScheduledOnceTask> = {}): ScheduledOnceTask {
+function createTask(
+  partial: Partial<Omit<ScheduledOnceTask, "sessionId" | "sessionTitle">> = {},
+): ScheduledOnceTask {
   return {
     id: "task-1",
     kind: "once",
     projectId: "project-1",
     projectWorktree: "D:\\Projects\\Repo",
+    sessionId: "session-1",
+    sessionTitle: "Session 1",
     model: {
       providerID: "openai",
       modelID: "gpt-5",
@@ -95,6 +100,7 @@ function createAssistantMessage(
     finish?: string;
     stepFinishReason?: string;
     parts?: Array<Record<string, unknown>>;
+    createdAt?: number;
   } = {},
 ) {
   const generatedParts: Array<Record<string, unknown>> = [];
@@ -130,8 +136,8 @@ function createAssistantMessage(
       sessionID: "session-1",
       role: "assistant" as const,
       time: options.completed
-        ? { created: Date.now(), completed: Date.now() }
-        : { created: Date.now() },
+        ? { created: options.createdAt ?? Date.now() + 1000, completed: Date.now() + 1000 }
+        : { created: options.createdAt ?? Date.now() + 1000 },
       parentID: "user-1",
       modelID: "gpt-5",
       providerID: "openai",
@@ -165,8 +171,8 @@ describe("app/services/scheduled-task-executor-service", () => {
     mocked.questionRejectMock.mockReset();
     mocked.permissionListMock.mockReset();
     mocked.permissionReplyMock.mockReset();
-    mocked.cleanupIgnoresMock.mockReset();
-    mocked.registerIgnoreMock.mockReset();
+    mocked.markScheduledSessionActiveMock.mockReset();
+    mocked.markScheduledSessionInactiveMock.mockReset();
     mocked.loggerWarnMock.mockReset();
     mocked.questionListMock.mockResolvedValue({ data: [], error: null });
     mocked.questionRejectMock.mockResolvedValue({ data: true, error: null });
@@ -174,8 +180,7 @@ describe("app/services/scheduled-task-executor-service", () => {
     mocked.permissionReplyMock.mockResolvedValue({ data: true, error: null });
     mocked.abortMock.mockResolvedValue({ data: true, error: null });
     mocked.deleteMock.mockResolvedValue(undefined);
-    mocked.cleanupIgnoresMock.mockResolvedValue(0);
-    mocked.registerIgnoreMock.mockResolvedValue(undefined);
+    mocked.statusMock.mockResolvedValue({ data: {}, error: null });
   });
 
   afterEach(() => {
@@ -194,10 +199,12 @@ describe("app/services/scheduled-task-executor-service", () => {
       data: [createAssistantMessage("Finished successfully", { completed: true })],
       error: null,
     });
-    mocked.statusMock.mockResolvedValueOnce({
-      data: { "session-1": { type: "busy" } },
-      error: null,
-    });
+    mocked.statusMock
+      .mockResolvedValueOnce({ data: {}, error: null })
+      .mockResolvedValueOnce({
+        data: { "session-1": { type: "busy" } },
+        error: null,
+      });
 
     vi.useFakeTimers();
 
@@ -219,11 +226,12 @@ describe("app/services/scheduled-task-executor-service", () => {
         variant: "default",
       }),
     );
-    expect(mocked.statusMock).toHaveBeenCalledTimes(1);
+    expect(mocked.statusMock).toHaveBeenCalledTimes(2);
     expect(mocked.messagesMock).toHaveBeenCalledTimes(2);
-    expect(mocked.cleanupIgnoresMock).toHaveBeenCalledTimes(1);
-    expect(mocked.registerIgnoreMock).toHaveBeenCalledWith("session-1");
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.markScheduledSessionActiveMock).toHaveBeenCalledWith("session-1");
+    expect(mocked.markScheduledSessionInactiveMock).toHaveBeenCalledWith("session-1");
+    expect(mocked.createMock).not.toHaveBeenCalled();
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
   });
 
   it("re-reads messages after idle before returning the assistant result", async () => {
@@ -243,15 +251,141 @@ describe("app/services/scheduled-task-executor-service", () => {
         data: [createAssistantMessage("Final completed output", { completed: true })],
         error: null,
       });
-    mocked.statusMock.mockResolvedValueOnce({
-      data: { "session-1": { type: "idle" } },
-      error: null,
-    });
+    mocked.statusMock
+      .mockResolvedValueOnce({ data: {}, error: null })
+      .mockResolvedValueOnce({
+        data: { "session-1": { type: "idle" } },
+        error: null,
+      });
 
     await expect(executeScheduledTask(createTask())).resolves.toMatchObject({
       status: "success",
       resultText: "Final completed output",
       errorMessage: null,
+    });
+    expect(mocked.messagesMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits for the bound session to become idle before dispatching", async () => {
+    const { executeScheduledTask } = await import(
+      "../../../src/app/services/scheduled-task-executor-service.js"
+    );
+    mocked.statusMock
+      .mockResolvedValueOnce({ data: { "session-1": { type: "busy" } }, error: null })
+      .mockResolvedValueOnce({ data: {}, error: null });
+    mocked.promptAsyncMock.mockResolvedValueOnce({ data: undefined, error: null });
+    mocked.messagesMock.mockResolvedValueOnce({
+      data: [
+        createAssistantMessage("Finished after waiting", {
+          completed: true,
+          createdAt: Date.now() + 3000,
+        }),
+      ],
+      error: null,
+    });
+    vi.useFakeTimers();
+
+    const resultPromise = executeScheduledTask(createTask());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocked.promptAsyncMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(resultPromise).resolves.toMatchObject({
+      status: "success",
+      resultText: "Finished after waiting",
+    });
+    expect(mocked.promptAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits while the bound session is retrying", async () => {
+    const { executeScheduledTask } = await import(
+      "../../../src/app/services/scheduled-task-executor-service.js"
+    );
+    mocked.statusMock
+      .mockResolvedValueOnce({ data: { "session-1": { type: "retry" } }, error: null })
+      .mockResolvedValueOnce({ data: {}, error: null });
+    mocked.promptAsyncMock.mockResolvedValueOnce({ data: undefined, error: null });
+    mocked.messagesMock.mockResolvedValueOnce({
+      data: [
+        createAssistantMessage("Finished after retry", {
+          completed: true,
+          createdAt: Date.now() + 3000,
+        }),
+      ],
+      error: null,
+    });
+    vi.useFakeTimers();
+
+    const resultPromise = executeScheduledTask(createTask());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocked.promptAsyncMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(resultPromise).resolves.toMatchObject({
+      status: "success",
+      resultText: "Finished after retry",
+    });
+  });
+
+  it("does not use a foreground response completed while waiting for idle", async () => {
+    const { executeScheduledTask } = await import(
+      "../../../src/app/services/scheduled-task-executor-service.js"
+    );
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-16T10:00:00.000Z"));
+    const foregroundResponse = createAssistantMessage("Foreground answer", {
+      completed: true,
+      createdAt: Date.parse("2026-03-16T10:00:01.000Z"),
+    });
+    const scheduledResponse = createAssistantMessage("Scheduled answer", {
+      completed: true,
+      createdAt: Date.parse("2026-03-16T10:00:03.000Z"),
+    });
+    mocked.statusMock
+      .mockResolvedValueOnce({ data: { "session-1": { type: "busy" } }, error: null })
+      .mockResolvedValueOnce({ data: {}, error: null })
+      .mockResolvedValueOnce({ data: { "session-1": { type: "busy" } }, error: null });
+    mocked.promptAsyncMock.mockResolvedValueOnce({ data: undefined, error: null });
+    mocked.messagesMock
+      .mockResolvedValueOnce({ data: [foregroundResponse], error: null })
+      .mockResolvedValueOnce({ data: [foregroundResponse, scheduledResponse], error: null });
+
+    const resultPromise = executeScheduledTask(createTask());
+    await vi.advanceTimersByTimeAsync(4000);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      status: "success",
+      resultText: "Scheduled answer",
+    });
+    expect(mocked.messagesMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores assistant messages that predate the scheduled run", async () => {
+    const { executeScheduledTask } = await import(
+      "../../../src/app/services/scheduled-task-executor-service.js"
+    );
+    const oldMessage = createAssistantMessage("Old answer", {
+      completed: true,
+      createdAt: 1,
+    });
+    mocked.promptAsyncMock.mockResolvedValueOnce({ data: undefined, error: null });
+    mocked.messagesMock
+      .mockResolvedValueOnce({ data: [oldMessage], error: null })
+      .mockResolvedValueOnce({
+        data: [oldMessage, createAssistantMessage("New scheduled answer", { completed: true })],
+        error: null,
+      });
+    mocked.statusMock
+      .mockResolvedValueOnce({ data: {}, error: null })
+      .mockResolvedValueOnce({ data: { "session-1": { type: "busy" } }, error: null });
+    vi.useFakeTimers();
+
+    const resultPromise = executeScheduledTask(createTask());
+    await vi.advanceTimersByTimeAsync(2000);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      status: "success",
+      resultText: "New scheduled answer",
     });
     expect(mocked.messagesMock).toHaveBeenCalledTimes(2);
   });
@@ -274,7 +408,7 @@ describe("app/services/scheduled-task-executor-service", () => {
       errorMessage: expect.stringContaining("https://opencode.ai/docs/config/#models"),
     });
     expect(mocked.messagesMock).not.toHaveBeenCalled();
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
   });
 
   it("returns a helpful timeout message when assistant result contains a timeout error", async () => {
@@ -315,6 +449,7 @@ describe("app/services/scheduled-task-executor-service", () => {
       data: { "session-1": { type: "busy" } },
       error: null,
     });
+    mocked.statusMock.mockResolvedValueOnce({ data: {}, error: null });
 
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-16T10:00:00.000Z"));
@@ -328,7 +463,7 @@ describe("app/services/scheduled-task-executor-service", () => {
       resultText: null,
       errorMessage: "Scheduled task exceeded bot execution timeout after 120 minutes.",
     });
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
   });
 
   it("waits through startup before the server registers the session as active", async () => {
@@ -373,7 +508,7 @@ describe("app/services/scheduled-task-executor-service", () => {
     expect(mocked.loggerWarnMock).not.toHaveBeenCalledWith(
       expect.stringContaining("Scheduled task finished without a completed assistant response"),
     );
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
   });
 
   it("treats an empty completed assistant reply as an execution error", async () => {
@@ -417,9 +552,10 @@ describe("app/services/scheduled-task-executor-service", () => {
         }),
       }),
     );
-    expect(mocked.loggerWarnMock).toHaveBeenCalledWith(
-      expect.stringContaining("Keeping temporary session for inspection"),
-    );
+    expect(mocked.abortMock).toHaveBeenCalledWith({
+      sessionID: "session-1",
+      directory: "D:\\Projects\\Repo",
+    });
   });
 
   it("re-reads an empty completed assistant reply before accepting late text", async () => {
@@ -460,7 +596,7 @@ describe("app/services/scheduled-task-executor-service", () => {
       errorMessage: null,
     });
     expect(mocked.messagesMock).toHaveBeenCalledTimes(4);
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
   });
 
   it("waits for the final assistant response after completed tool-call turns", async () => {
@@ -495,6 +631,7 @@ describe("app/services/scheduled-task-executor-service", () => {
       data: { "session-1": { type: "busy" } },
       error: null,
     });
+    mocked.statusMock.mockResolvedValueOnce({ data: {}, error: null });
 
     vi.useFakeTimers();
 
@@ -508,8 +645,8 @@ describe("app/services/scheduled-task-executor-service", () => {
       errorMessage: null,
     });
     expect(mocked.messagesMock).toHaveBeenCalledTimes(5);
-    expect(mocked.statusMock).toHaveBeenCalledTimes(4);
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.statusMock).toHaveBeenCalledTimes(5);
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
     expect(mocked.loggerWarnMock).not.toHaveBeenCalledWith(
       "[ScheduledTaskExecutor] Empty completed assistant response diagnostics",
       expect.anything(),
@@ -537,7 +674,7 @@ describe("app/services/scheduled-task-executor-service", () => {
       resultText: "Real scheduled result",
       errorMessage: null,
     });
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
   });
 
   it("fails, rejects, aborts, and cleans up when scheduled task asks a question", async () => {
@@ -572,7 +709,7 @@ describe("app/services/scheduled-task-executor-service", () => {
       sessionID: "session-1",
       directory: "D:\\Projects\\Repo",
     });
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
     expect(mocked.messagesMock).not.toHaveBeenCalled();
   });
 
@@ -613,7 +750,7 @@ describe("app/services/scheduled-task-executor-service", () => {
       sessionID: "session-1",
       directory: "D:\\Projects\\Repo",
     });
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
     expect(mocked.messagesMock).not.toHaveBeenCalled();
   });
 
@@ -661,31 +798,7 @@ describe("app/services/scheduled-task-executor-service", () => {
     expect(mocked.questionRejectMock).not.toHaveBeenCalled();
     expect(mocked.permissionReplyMock).not.toHaveBeenCalled();
     expect(mocked.abortMock).not.toHaveBeenCalled();
-    expect(mocked.deleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
+    expect(mocked.deleteMock).not.toHaveBeenCalled();
   });
 
-  it("keeps the successful result even if temporary session cleanup fails", async () => {
-    const { executeScheduledTask } = await import("../../../src/app/services/scheduled-task-executor-service.js");
-
-    mocked.createMock.mockResolvedValueOnce({
-      data: { id: "session-1", directory: "D:\\Projects\\Repo", title: "Scheduled task run" },
-      error: null,
-    });
-    mocked.promptAsyncMock.mockResolvedValueOnce({ data: undefined, error: null });
-    mocked.messagesMock.mockResolvedValueOnce({
-      data: [createAssistantMessage("All good", { completed: true })],
-      error: null,
-    });
-    mocked.deleteMock.mockRejectedValueOnce(new Error("cleanup failed"));
-
-    await expect(executeScheduledTask(createTask())).resolves.toMatchObject({
-      status: "success",
-      resultText: "All good",
-      errorMessage: null,
-    });
-    expect(mocked.loggerWarnMock).toHaveBeenCalledWith(
-      expect.stringContaining("Failed to delete temporary session"),
-      expect.any(Error),
-    );
-  });
 });

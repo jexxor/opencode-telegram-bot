@@ -93,7 +93,11 @@ function decodePathFromCallback(
   return raw;
 }
 
-export function encodeOpenPathForCallback(prefix: string, fullPath: string, reserveBytes = 0): string {
+export function encodeOpenPathForCallback(
+  prefix: string,
+  fullPath: string,
+  reserveBytes = 0,
+): string {
   return encodePathForCallback(
     openPathIndex,
     () => openPathCounter++,
@@ -107,28 +111,41 @@ export function decodeOpenPathFromCallback(prefix: string, data: string): string
   return decodePathFromCallback(openPathIndex, prefix, data);
 }
 
-export function encodeLsPathForCallback(prefix: string, fullPath: string, reserveBytes = 0): string {
-  return encodePathForCallback(
-    lsPathIndex,
-    () => lsPathCounter++,
-    prefix,
-    fullPath,
-    reserveBytes,
-  );
+export function encodeLsPathForCallback(
+  prefix: string,
+  fullPath: string,
+  reserveBytes = 0,
+): string {
+  return encodePathForCallback(lsPathIndex, () => lsPathCounter++, prefix, fullPath, reserveBytes);
 }
 
 export function decodeLsPathFromCallback(prefix: string, data: string): string | null {
   return decodePathFromCallback(lsPathIndex, prefix, data);
 }
 
-function encodeOpenPaginationCallback(currentPath: string, page: number): string {
+export function encodeOpenPathWithPageCallback(
+  prefix: string,
+  currentPath: string,
+  page: number,
+): string {
   const pageSuffix = `${PAGE_SEPARATOR}${page}`;
   const reserveBytes = Buffer.byteLength(pageSuffix, "utf-8");
-  return `${encodeOpenPathForCallback(OPEN_CALLBACK_PAGE_PREFIX, currentPath, reserveBytes)}${pageSuffix}`;
+  return `${encodeOpenPathForCallback(prefix, currentPath, reserveBytes)}${pageSuffix}`;
+}
+
+function encodeOpenPaginationCallback(currentPath: string, page: number): string {
+  return encodeOpenPathWithPageCallback(OPEN_CALLBACK_PAGE_PREFIX, currentPath, page);
 }
 
 export function decodeOpenPaginationCallback(data: string): { path: string; page: number } | null {
-  return decodePathWithPageCallback(openPathIndex, data, OPEN_CALLBACK_PAGE_PREFIX);
+  return decodeOpenPathWithPageCallback(data, OPEN_CALLBACK_PAGE_PREFIX);
+}
+
+export function decodeOpenPathWithPageCallback(
+  data: string,
+  prefix: string,
+): { path: string; page: number } | null {
+  return decodePathWithPageCallback(openPathIndex, data, prefix);
 }
 
 function encodeLsPathWithPageCallback(prefix: string, fullPath: string, page: number): string {
@@ -195,7 +212,10 @@ function buildOpenBrowseKeyboard(
   if (showUp || showRoots) {
     if (showUp) {
       const parentPath = path.dirname(currentPath);
-      keyboard.text(t("open.back"), encodeOpenPathForCallback(OPEN_CALLBACK_NAV_PREFIX, parentPath));
+      keyboard.text(
+        t("open.back"),
+        encodeOpenPathForCallback(OPEN_CALLBACK_NAV_PREFIX, parentPath),
+      );
     }
     if (showRoots) {
       keyboard.text(t("open.roots"), OPEN_CALLBACK_ROOTS);
@@ -214,7 +234,10 @@ function buildOpenBrowseKeyboard(
   }
 
   keyboard
-    .text(t("open.select_current"), encodeOpenPathForCallback(OPEN_CALLBACK_SELECT_PREFIX, currentPath))
+    .text(
+      t("open.select_current"),
+      encodeOpenPathForCallback(OPEN_CALLBACK_SELECT_PREFIX, currentPath),
+    )
     .row();
   appendInlineMenuCancelButton(keyboard, "open");
 
@@ -266,7 +289,12 @@ function buildLsEntryLabel(entry: LsEntry): string {
   return `${entry.type === "directory" ? "📁" : "📄"} ${entry.name}`;
 }
 
-function buildLsHeader(displayPath: string, totalCount: number, page: number, totalPages: number): string {
+function buildLsHeader(
+  displayPath: string,
+  totalCount: number,
+  page: number,
+  totalPages: number,
+): string {
   let header = `📁 ${t("ls.header")}\n<code>${escapeHtml(displayPath)}</code>`;
   if (totalPages > 1) {
     header += `\n(${page + 1}/${totalPages})`;
@@ -328,7 +356,10 @@ function buildLsBrowseKeyboard(
 
   if (hasParent && !isProjectRoot(currentPath)) {
     keyboard
-      .text(t("open.back"), encodeLsPathForCallback(LS_CALLBACK_NAV_PREFIX, getParentPath(currentPath)))
+      .text(
+        t("open.back"),
+        encodeLsPathForCallback(LS_CALLBACK_NAV_PREFIX, getParentPath(currentPath)),
+      )
       .row();
   }
 
@@ -350,7 +381,10 @@ function buildLsFileDetailsKeyboard(filePath: string, page: number): InlineKeybo
   const keyboard = new InlineKeyboard();
   const parentPath = getParentPath(filePath);
 
-  keyboard.text(t("ls.file.download"), encodeLsPathForCallback(LS_CALLBACK_DOWNLOAD_PREFIX, filePath));
+  keyboard.text(
+    t("ls.file.download"),
+    encodeLsPathForCallback(LS_CALLBACK_DOWNLOAD_PREFIX, filePath),
+  );
   keyboard.text(t("ls.file.back"), encodeLsBackCallback(parentPath, page));
   keyboard.row();
   appendInlineMenuCancelButton(keyboard, "ls");

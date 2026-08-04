@@ -321,8 +321,11 @@ describe("bot/messages/summary-message-formatter", () => {
   it("prepares file payloads for write/edit and skips oversized content", () => {
     const writeFile = prepareCodeFile("const x = 1;", "src/app.ts", "write");
     expect(writeFile).not.toBeNull();
-    expect(writeFile?.filename).toBe("write_app.ts.txt");
-    expect(writeFile?.buffer.toString("utf8")).toContain("Write File/Path: src/app.ts");
+    expect(writeFile?.filename).toBe("write_app.ts.md");
+    const writeBody = writeFile?.buffer.toString("utf8") ?? "";
+    expect(writeBody).toMatch(/^```typescript\n/);
+    expect(writeBody).toContain("Write File/Path: src/app.ts");
+    expect(writeBody).toMatch(/\n```$/);
 
     const diff = [
       "@@ -1,2 +1,2 @@",
@@ -337,12 +340,35 @@ describe("bot/messages/summary-message-formatter", () => {
     const editBody = editFile?.buffer.toString("utf8") ?? "";
 
     expect(editFile).not.toBeNull();
-    expect(editFile?.filename).toBe("edit_app.ts.txt");
+    expect(editFile?.filename).toBe("edit_app.ts.md");
+    expect(editBody).toMatch(/^```typescript\n/);
     expect(editBody).not.toContain("@@");
     expect(editBody).not.toContain("--- a/src/app.ts");
     expect(editBody).toContain(" line1");
     expect(editBody).toContain("- line2");
     expect(editBody).toContain("+ line2-updated");
+    expect(editBody).toMatch(/\n```$/);
+
+    const cppFile = prepareCodeFile("int main() {}", "src/main.cpp", "write");
+    expect(cppFile?.buffer.toString("utf8")).toMatch(/^```cpp\n/);
+
+    const javaFile = prepareCodeFile("class Main {}", "src/Main.java", "write");
+    expect(javaFile?.buffer.toString("utf8")).toMatch(/^```java\n/);
+
+    const markdownFile = prepareCodeFile("# Title", "README.md", "write");
+    expect(markdownFile?.buffer.toString("utf8")).toMatch(/^```md\n/);
+
+    const unknownFile = prepareCodeFile("plain text", "notes.xyz", "write");
+    expect(unknownFile?.buffer.toString("utf8")).toMatch(/^```\n/);
+
+    const markdownWithFence = prepareCodeFile(
+      "before\n```\ninside\n```\nafter",
+      "README.md",
+      "write",
+    );
+    const markdownBody = markdownWithFence?.buffer.toString("utf8") ?? "";
+    expect(markdownBody).toMatch(/^````md\n/);
+    expect(markdownBody).toMatch(/\n````$/);
 
     const oversized = prepareCodeFile("a".repeat(101 * 1024), "src/large.ts", "write");
     expect(oversized).toBeNull();

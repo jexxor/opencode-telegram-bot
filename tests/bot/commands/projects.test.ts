@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateProjectsPaginationRange,
   buildProjectButtonLabel,
+  buildProjectPathButtonLabel,
   getProjectFolderName,
   parseProjectPageCallback,
 } from "../../../src/bot/menus/project-selection-menu.js";
@@ -35,6 +36,20 @@ describe("bot/commands/projects", () => {
       expect(buildProjectButtonLabel(3, "D:\\repo\\awesome")).toBe(
         "4. awesome [D:\\repo\\awesome]",
       );
+    });
+  });
+
+  describe("buildProjectPathButtonLabel", () => {
+    it("keeps the path beginning and suffix while putting the folder first", () => {
+      const label = buildProjectPathButtonLabel(
+        "/opt/devel/polygon/v1/root/subordinates/itmo/subordinates/ais/subordinates/lab-5-knn",
+        { prefix: "2. " },
+      );
+
+      expect(label).toMatch(/^2\. 📁 lab-5-knn · \/opt\//);
+      expect(label).toContain("…");
+      expect(label).toContain("ais/subordinates/lab-5-knn");
+      expect(label.length).toBeLessThanOrEqual(64);
     });
   });
 

@@ -20,6 +20,8 @@ import type { QueuedScheduledTaskDelivery, ScheduledTask } from "../types/schedu
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const TASK_DESCRIPTION_PREVIEW_LENGTH = 64;
 const RESTART_INTERRUPTED_ERROR = "Interrupted by bot restart during scheduled task execution.";
+const MISSING_BOUND_SESSION_ERROR =
+  "Scheduled task is not bound to a session. Recreate the task from the target session.";
 
 export interface ScheduledTaskDeliverySender {
   send(delivery: QueuedScheduledTaskDelivery): Promise<boolean>;
@@ -200,6 +202,14 @@ export class ScheduledTaskRuntime {
         normalizedTask.lastStatus = "error";
         normalizedTask.lastError = RESTART_INTERRUPTED_ERROR;
         hasChanges = true;
+      }
+
+      if (!normalizedTask.sessionId || !normalizedTask.sessionTitle) {
+        normalizedTask.nextRunAt = null;
+        normalizedTask.lastStatus = "error";
+        normalizedTask.lastError = MISSING_BOUND_SESSION_ERROR;
+        hasChanges = true;
+        return normalizedTask;
       }
 
       if (normalizedTask.kind === "cron") {

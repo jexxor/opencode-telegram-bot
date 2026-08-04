@@ -1201,7 +1201,7 @@ class SummaryAggregator {
           this.onCostCallback(assistantInfo.cost);
         }
 
-        if (this.onCompleteCallback && finalText.length > 0) {
+        if (this.onCompleteCallback) {
           this.onCompleteCallback(this.currentSessionId!, messageID, finalText, {
             agent: assistantMessage.agent,
             providerID: assistantMessage.providerID,

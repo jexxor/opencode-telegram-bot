@@ -11,7 +11,7 @@ interface LocaleDefinition {
   code: string;
   label: string;
   dateLocale: string;
-  dictionary: Record<I18nKey, string>;
+  dictionary: Partial<Record<I18nKey, string>>;
 }
 
 const LOCALE_DEFINITIONS = [

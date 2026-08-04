@@ -5,6 +5,8 @@ import { questionManager } from "../../app/managers/question-manager.js";
 import { t } from "../../i18n/index.js";
 import { logger } from "../../utils/logger.js";
 import { handleTaskTextInput } from "../commands/task-command.js";
+import { handleLoopTextInput } from "../commands/loop-command.js";
+import { handleMissionTextInput } from "../commands/mission-command.js";
 import {
   handleModelSearchTextInput,
 } from "../callbacks/model-selection-callback-handler.js";
@@ -167,6 +169,16 @@ export function registerMessageRouter(bot: Bot<Context>, deps: MessageRouterDeps
 
     if (questionManager.isActive()) {
       await handleQuestionTextAnswer(ctx);
+      return;
+    }
+
+    const handledLoop = await handleLoopTextInput(ctx);
+    if (handledLoop) {
+      return;
+    }
+
+    const handledMission = await handleMissionTextInput(ctx);
+    if (handledMission) {
       return;
     }
 

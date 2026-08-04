@@ -213,6 +213,7 @@ export const config = {
     commandsListLimit: getOptionalPositiveIntEnvVar("COMMANDS_LIST_LIMIT", 10),
     modelsListLimit: getOptionalPositiveIntEnvVar("MODELS_LIST_LIMIT", 10),
     taskLimit: getOptionalPositiveIntEnvVar("TASK_LIMIT", 10),
+    missionConcurrencyLimit: getOptionalPositiveIntEnvVar("MISSION_CONCURRENCY_LIMIT", 8),
     scheduledTaskExecutionTimeoutMinutes: getOptionalPositiveIntEnvVar(
       "SCHEDULED_TASK_EXECUTION_TIMEOUT_MINUTES",
       120,

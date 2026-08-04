@@ -5,6 +5,8 @@ export interface AssistantRunStartInfo {
   configuredAgent?: string;
   configuredProviderID?: string;
   configuredModelID?: string;
+  agentLoopId?: string;
+  agentLoopRunStartedAt?: string;
 }
 
 export interface AssistantRunResolvedInfo {
@@ -35,6 +37,10 @@ class AssistantRunState {
       configuredAgent: info.configuredAgent,
       configuredProviderID: info.configuredProviderID,
       configuredModelID: info.configuredModelID,
+      ...(info.agentLoopId ? { agentLoopId: info.agentLoopId } : {}),
+      ...(info.agentLoopRunStartedAt
+        ? { agentLoopRunStartedAt: info.agentLoopRunStartedAt }
+        : {}),
       hasCompletedResponse: false,
     });
 
@@ -59,6 +65,11 @@ class AssistantRunState {
     if (info?.modelID) {
       run.actualModelID = info.modelID;
     }
+  }
+
+  getRun(sessionId: string): AssistantRunInfo | null {
+    const run = this.runs.get(sessionId);
+    return run ? { ...run } : null;
   }
 
   finishRun(sessionId: string, reason: string): AssistantRunInfo | null {

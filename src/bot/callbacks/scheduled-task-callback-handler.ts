@@ -185,7 +185,7 @@ function formatTaskDetails(task: ScheduledTask): string {
 
   return t("tasklist.details", {
     prompt: truncatePromptForDetails(task.prompt),
-    project: `${task.projectWorktree}\n${t("status.line.model", { model })}`,
+    project: `${task.projectWorktree}\n${t("status.session_selected", { title: task.sessionTitle })}\n${t("status.line.model", { model })}`,
     schedule: task.scheduleSummary,
     cronLine,
     timezone: task.timezone,

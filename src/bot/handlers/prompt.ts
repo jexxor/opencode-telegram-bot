@@ -23,6 +23,7 @@ import { formatErrorDetails } from "../../utils/error-format.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { foregroundSessionState } from "../../app/managers/foreground-session-state-manager.js";
+import { sessionStatusManager } from "../../app/managers/session-status-manager.js";
 import { assistantRunState } from "../../app/managers/assistant-run-state-manager.js";
 import {
   attachToSession,
@@ -31,6 +32,9 @@ import {
   markAttachedSessionIdle,
 } from "../../app/services/attach-service.js";
 import { externalUserInputSuppressionManager } from "../../app/managers/external-input-suppression-manager.js";
+import { randomUUID } from "node:crypto";
+import { addQueuedSessionPrompt } from "../../app/stores/session-prompt-queue-store.js";
+import { sessionPromptQueueRuntime } from "../../app/services/session-prompt-queue-runtime-service.js";
 
 /** Module-level references for async callbacks that don't have ctx. */
 let botInstance: Bot<Context> | null = null;
@@ -211,17 +215,37 @@ export async function processUserPrompt(
     });
   }
 
+  const currentAgent = await resolveProjectAgent(getStoredAgent());
+  const storedModel = getStoredModel();
   const sessionIsBusy = await isSessionBusy(currentSession.id, currentSession.directory);
   if (sessionIsBusy) {
-    logger.info(`[Bot] Ignoring new prompt: session ${currentSession.id} is busy`);
-    await ctx.reply(t("bot.session_busy"));
+    if (text.trim() && fileParts.length === 0) {
+      const position = await addQueuedSessionPrompt({
+        id: randomUUID(),
+        sessionId: currentSession.id,
+        sessionTitle: currentSession.title,
+        directory: currentSession.directory,
+        text,
+        agent: currentAgent,
+        model: {
+          providerID: storedModel.providerID,
+          modelID: storedModel.modelID,
+          ...(storedModel.variant ? { variant: storedModel.variant } : {}),
+        },
+        createdAt: new Date().toISOString(),
+      });
+      sessionPromptQueueRuntime.notifyQueueChanged();
+      logger.info(
+        `[Bot] Queued prompt for busy session: session=${currentSession.id}, position=${position}`,
+      );
+      await ctx.reply(t("bot.prompt_queued", { position, session: currentSession.title }));
+    } else {
+      await ctx.reply(t("bot.session_busy"));
+    }
     return false;
   }
 
   try {
-    const currentAgent = await resolveProjectAgent(getStoredAgent());
-    const storedModel = getStoredModel();
-
     // Build parts array with text and files
     const parts: Array<TextPartInput | FilePartInput> = [];
 
@@ -285,6 +309,7 @@ export async function processUserPrompt(
     );
 
     foregroundSessionState.markBusy(currentSession.id, currentSession.directory);
+    sessionStatusManager.markWorking(currentSession.id);
     await markAttachedSessionBusy(currentSession.id);
     assistantRunState.startRun(currentSession.id, {
       startedAt: Date.now(),
@@ -309,6 +334,7 @@ export async function processUserPrompt(
       onSuccess: ({ error }) => {
         if (error) {
           foregroundSessionState.markIdle(currentSession.id);
+          sessionStatusManager.markFinished(currentSession.id);
           void markAttachedSessionIdle(currentSession.id);
           assistantRunState.clearRun(currentSession.id, "session_prompt_api_error");
           clearPromptResponseMode(currentSession.id);
@@ -329,6 +355,7 @@ export async function processUserPrompt(
       },
       onError: (error) => {
         foregroundSessionState.markIdle(currentSession.id);
+        sessionStatusManager.markFinished(currentSession.id);
         void markAttachedSessionIdle(currentSession.id);
         assistantRunState.clearRun(currentSession.id, "session_prompt_background_error");
         clearPromptResponseMode(currentSession.id);
@@ -344,6 +371,7 @@ export async function processUserPrompt(
   } catch (err) {
     if (currentSession) {
       foregroundSessionState.markIdle(currentSession.id);
+      sessionStatusManager.markFinished(currentSession.id);
       await markAttachedSessionIdle(currentSession.id);
       assistantRunState.clearRun(currentSession.id, "session_prompt_handler_error");
     }

@@ -299,7 +299,7 @@ describe("interaction guard", () => {
     expect(decision.inputType).toBe("other");
   });
 
-  it("allows only abort, detach, status, and help commands while busy without interaction", () => {
+  it("allows session and project control commands while busy without interaction", () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
 
     expect(resolveInteractionGuardDecision(createContext({ text: "/abort" })).allow).toBe(true);
@@ -307,13 +307,21 @@ describe("interaction guard", () => {
     expect(resolveInteractionGuardDecision(createContext({ text: "/status" })).allow).toBe(true);
     expect(resolveInteractionGuardDecision(createContext({ text: "/help" })).allow).toBe(true);
 
-    const blockedDecision = resolveInteractionGuardDecision(createContext({ text: "/new" }));
-    expect(blockedDecision.allow).toBe(false);
-    expect(blockedDecision.reason).toBe("command_not_allowed");
-    expect(blockedDecision.busy).toBe(true);
+    const sessionDecision = resolveInteractionGuardDecision(createContext({ text: "/sessions" }));
+    const workingDecision = resolveInteractionGuardDecision(createContext({ text: "/working" }));
+    const projectsDecision = resolveInteractionGuardDecision(createContext({ text: "/projects" }));
+    const loopDecision = resolveInteractionGuardDecision(createContext({ text: "/loop" }));
+    const loopsDecision = resolveInteractionGuardDecision(createContext({ text: "/loops" }));
+    const newSessionDecision = resolveInteractionGuardDecision(createContext({ text: "/new" }));
+    expect(sessionDecision.allow).toBe(true);
+    expect(workingDecision.allow).toBe(true);
+    expect(projectsDecision.allow).toBe(true);
+    expect(loopDecision.allow).toBe(true);
+    expect(loopsDecision.allow).toBe(true);
+    expect(newSessionDecision.allow).toBe(true);
   });
 
-  it("blocks start, plain text, and media while busy without interaction", () => {
+  it("allows queueable text and blocks start and media while busy without interaction", () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
 
     const startDecision = resolveInteractionGuardDecision(createContext({ text: "/start" }));
@@ -323,8 +331,7 @@ describe("interaction guard", () => {
 
     expect(startDecision.allow).toBe(false);
     expect(startDecision.reason).toBe("command_not_allowed");
-    expect(textDecision.allow).toBe(false);
-    expect(textDecision.reason).toBe("expected_text");
+    expect(textDecision.allow).toBe(true);
     expect(voiceDecision.allow).toBe(false);
     expect(voiceDecision.reason).toBe("expected_text");
     expect(photoDecision.allow).toBe(false);
@@ -344,7 +351,7 @@ describe("interaction guard", () => {
     const textDecision = resolveInteractionGuardDecision(createContext({ text: "custom answer" }));
     const commandDecision = resolveInteractionGuardDecision(createContext({ text: "/status" }));
     const detachDecision = resolveInteractionGuardDecision(createContext({ text: "/detach" }));
-    const blockedCommand = resolveInteractionGuardDecision(createContext({ text: "/new" }));
+    const newSessionCommand = resolveInteractionGuardDecision(createContext({ text: "/new" }));
 
     expect(callbackDecision.allow).toBe(true);
     expect(callbackDecision.busy).toBe(true);
@@ -352,8 +359,7 @@ describe("interaction guard", () => {
     expect(textDecision.busy).toBe(true);
     expect(commandDecision.allow).toBe(true);
     expect(detachDecision.allow).toBe(true);
-    expect(blockedCommand.allow).toBe(false);
-    expect(blockedCommand.reason).toBe("command_not_allowed");
+    expect(newSessionCommand.allow).toBe(true);
   });
 
   it("allows valid permission callback while busy and blocks other inputs", () => {

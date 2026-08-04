@@ -23,6 +23,8 @@ function createScheduledTask(overrides: Partial<ScheduledTask> = {}): ScheduledT
     kind: "cron",
     projectId: "project-1",
     projectWorktree: "D:/Projects/Repo",
+    sessionId: "session-1",
+    sessionTitle: "Session 1",
     model: {
       providerID: "openai",
       modelID: "gpt-5",
